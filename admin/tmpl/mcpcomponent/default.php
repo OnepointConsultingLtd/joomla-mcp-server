@@ -23,7 +23,7 @@ HTMLHelper::_('behavior.core');
     <div class="row mb-4">
         <div class="col-md-8">
             <h1 class="display-5">MCP Server</h1>
-            <p class="lead"><?php echo Text::_('COM_MCPSERVER_COMPONENT_INTRO'); ?></p>
+            <p class="lead"><?php echo Text::_($this->governedMode ? 'COM_MCPSERVER_COMPONENT_INTRO_GOVERNED' : 'COM_MCPSERVER_COMPONENT_INTRO'); ?></p>
         </div>
         <div class="col-md-4 text-end">
             <a class="btn btn-outline-secondary me-1" href="index.php?option=com_mcpserver&amp;view=dashboard">
@@ -36,6 +36,23 @@ HTMLHelper::_('behavior.core');
             </a>
         </div>
     </div>
+
+    <?php if ($this->governedMode): ?>
+        <div class="alert alert-info mb-4" role="status">
+            <h2 class="h5 alert-heading"><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_TITLE'); ?></h2>
+            <p><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_DESC'); ?></p>
+            <ol class="mb-3">
+                <li><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_STEP_1'); ?></li>
+                <li><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_STEP_2'); ?></li>
+                <li><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_STEP_3'); ?></li>
+                <li><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_STEP_4'); ?></li>
+            </ol>
+            <a class="btn btn-primary" href="index.php?option=com_mcpserver&amp;task=credentials.display">
+                <span class="icon-key" aria-hidden="true"></span>
+                <?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_CREDENTIALS_BUTTON'); ?>
+            </a>
+        </div>
+    <?php endif; ?>
     
     <div class="card mb-4 shadow-sm">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -50,7 +67,7 @@ HTMLHelper::_('behavior.core');
             </div>
         </div>
         <div class="card-body">
-            <p class="text-muted small mb-2">Copy this JSON into your <code>mcp_config.json</code> file for tools like Cursor or Claude Desktop.</p>
+            <p class="text-muted small mb-2"><?php echo Text::_($this->governedMode ? 'COM_MCPSERVER_MANUAL_CONFIG_GOVERNED_DESC' : 'COM_MCPSERVER_MANUAL_CONFIG_LEGACY_DESC'); ?></p>
             <div class="position-relative">
                 <pre id="mcpConfigJson" class="m-0 p-3 border rounded bg-body-secondary text-body"><code class="language-json"><?php echo htmlspecialchars($this->mcpConfig['json']); ?></code></pre>
             </div>
@@ -71,7 +88,10 @@ HTMLHelper::_('behavior.core');
                     <tr>
                         <th class="ps-3">Authentication</th>
                         <td>
-                            <?php if ($this->mcpConfig['token']): ?>
+                            <?php if ($this->governedMode): ?>
+                                <span class="badge bg-success"><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_AUTH'); ?></span>
+                                <span class="ms-2"><?php echo Text::_('COM_MCPSERVER_MANUAL_GOVERNED_AUTH_DESC'); ?></span>
+                            <?php elseif ($this->mcpConfig['token']): ?>
                                 <span class="badge bg-success">Bearer Token Enabled</span>
                                 <span class="ms-2">
                                     <code id="tokenDisplay"><?php echo htmlspecialchars($this->mcpConfig['maskedToken']); ?></code>

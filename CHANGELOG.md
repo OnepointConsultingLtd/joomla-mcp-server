@@ -2,6 +2,13 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## 1.8.0 - 2026-08-21
+
+- Added Governed Mode: per-client issued, revocable credentials that authenticate MCP requests individually and make outbound Joomla API calls with each user's own API token instead of the single shared token, with a `#__mcpserver_credential` table storing encrypted tokens keyed on a generated credential salt.
+- Added a governance audit trail (extended `#__mcpserver_request_log` columns: `request_id`, `credential_id`, `user_id`, `credential_selector`, `target`) and attribution of successful mutating tool calls made under a governed credential to Joomla's core Action Logs, when the `System - Action Logs` plugin is enabled.
+- Added a **My Credentials** administrator page for provisioning Governed Mode, issuing and revoking per-user credentials, and viewing the recovery key fingerprint.
+- Documented Governed Mode setup, migrating clients off the shared bearer/API token, rollback and recovery, and the Joomla Action Logs prerequisite in the README.
+
 ## 1.7.0 - 2026-08-13
 
 - Added four read-only site-diagnostics tools (`get_rendered_page`, `diff_article_versions`, `seo_audit_articles`, `check_internal_links`) so an agent can verify what a visitor sees, what changed between article versions, and whether content has SEO or internal-link problems.

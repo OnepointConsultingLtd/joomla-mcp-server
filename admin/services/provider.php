@@ -21,6 +21,7 @@ use Joomla\CMS\Dispatcher\DispatcherInterface;
 use Joomla\CMS\Extension\ComponentInterface;
 use Joomla\CMS\Extension\Service\Provider\MVCFactory as MVCFactoryProvider;
 use Joomla\CMS\Extension\Service\Provider\RouterFactory as RouterFactoryProvider;
+use Joomla\CMS\Factory;
 use Joomla\CMS\MVC\Factory\MVCFactoryInterface;
 use Joomla\CMS\Component\Router\RouterFactoryInterface;
 use Joomla\CMS\Application\CMSApplicationInterface;
@@ -29,7 +30,18 @@ use Joomla\Component\Mcpserver\Administrator\Dispatcher\Dispatcher;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialCipher;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditQueryService;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditRetentionService;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernanceKeyMaterial;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernedAuthService;
+use Joomla\Component\Mcpserver\Administrator\Service\GovernedCredentialAuthenticator;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaActionLogService;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialLifecycleStore;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialStore;
 use Joomla\Component\Mcpserver\Administrator\Service\McpbService;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
@@ -37,6 +49,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
 use Joomla\Component\Mcpserver\Administrator\Service\PromptRegistry;
 use Joomla\Component\Mcpserver\Administrator\Service\RateLimiter;
 use Joomla\Component\Mcpserver\Administrator\Service\RestClient;
+use Joomla\Component\Mcpserver\Administrator\Service\RestClientFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\RpcService;
 use Joomla\Component\Mcpserver\Administrator\Service\SchemaValidator;
 use Joomla\Component\Mcpserver\Administrator\Service\ToolRegistry;
@@ -55,9 +68,74 @@ return new class implements ServiceProviderInterface {
 
         $container->set(Registry::class, new Registry());
 
+        // Governed-mode credential cipher. Derives its key from the Joomla
+        // application secret (injected via callable, never an environment
+        // variable) and the component's own salt. Fails closed (throws) until
+        // an admin enable action provisions a valid credential_salt.
+        $container->share(CredentialCipher::class, function () {
+            $params = ComponentHelper::getParams('com_mcpserver');
+            $salt = (string) $params->get('credential_salt', '');
+
+            $keyMaterial = new GovernanceKeyMaterial(
+                static fn (): string => (string) Factory::getApplication()->get('secret', ''),
+                $salt
+            );
+
+            return $keyMaterial->createCipher();
+        });
+
+        // Governed-mode credential store
+        $container->share(JoomlaCredentialStore::class, function () {
+            return new JoomlaCredentialStore(Factory::getDbo());
+        });
+
+        // Credential lifecycle store: persists issuance/listing/revocation of
+        // MCP credentials in #__mcpserver_credential.
+        $container->share(JoomlaCredentialLifecycleStore::class, function () {
+            return new JoomlaCredentialLifecycleStore(Factory::getDbo());
+        });
+
+        // Credential lifecycle service: owns issuance, listing, and
+        // revocation invariants for MCP credentials.
+        $container->share(CredentialLifecycleService::class, function (Container $container) {
+            return new CredentialLifecycleService(
+                $container->get(JoomlaCredentialLifecycleStore::class),
+                $container->get(CredentialCipher::class)
+            );
+        });
+
+        // Governed-mode credential authenticator
+        $container->share(GovernedCredentialAuthenticator::class, function (Container $container) {
+            return new GovernedCredentialAuthenticator(
+                $container->get(JoomlaCredentialStore::class),
+                $container->get(CredentialCipher::class)
+            );
+        });
+
+        // Governed-mode auth service
+        $container->share(GovernedAuthService::class, function (Container $container) {
+            return new GovernedAuthService(
+                $container->get(GovernedCredentialAuthenticator::class),
+                static function (string $name, string $default): string {
+                    return Factory::getApplication()->input->server->getString($name, $default);
+                }
+            );
+        });
+
         // Auth service
         $container->share(AuthService::class, function (Container $container) {
-            return new AuthService(ComponentHelper::getParams('com_mcpserver'));
+            $governedAuthService = null;
+
+            try {
+                $governedAuthService = $container->get(GovernedAuthService::class);
+            } catch (\RuntimeException) {
+                // Governed key material is not yet provisioned (e.g. empty or
+                // malformed credential_salt). Fail closed: legacy mode keeps
+                // working; governed mode reports "not configured" at request time.
+                $governedAuthService = null;
+            }
+
+            return new AuthService(ComponentHelper::getParams('com_mcpserver'), $governedAuthService);
         });
 
         // Tool registry
@@ -103,36 +181,79 @@ return new class implements ServiceProviderInterface {
             return new MetricsService(ComponentHelper::getParams('com_mcpserver'));
         });
 
+        // Governance audit service: persists one row per MCP request into
+        // #__mcpserver_request_log, attributed to the authenticated principal
+        // when one is available (null attribution in legacy shared-token mode).
+        $container->share(GovernanceAuditService::class, function () {
+            return new GovernanceAuditService(
+                Factory::getDbo(),
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now')
+            );
+        });
+
+        // Governance audit query service: read-only, safe-column search over
+        // #__mcpserver_request_log for the credentials screen's audit panel.
+        $container->share(GovernanceAuditQueryService::class, function () {
+            return new GovernanceAuditQueryService(Factory::getDbo());
+        });
+
+        // Governance audit retention service: admin-triggered prune of
+        // #__mcpserver_request_log rows older than the configured retention.
+        $container->share(GovernanceAuditRetentionService::class, function () {
+            return new GovernanceAuditRetentionService(
+                Factory::getDbo(),
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now')
+            );
+        });
+
+        // Joomla Action Log writer for successful mutating MCP tool calls.
+        // Resolved lazily: if com_actionlogs is not installed/available the
+        // writer is a safe no-op, and any failure inside it is already
+        // swallowed by JoomlaActionLogService so it never affects the MCP
+        // response being reported on.
+        $container->share(JoomlaActionLogService::class, function () {
+            return new JoomlaActionLogService(static function (int $userId, string $messageKey, string $context, array $message): void {
+                $modelClass = '\\Joomla\\Component\\Actionlogs\\Administrator\\Model\\ActionlogModel';
+
+                if (!class_exists($modelClass)) {
+                    return;
+                }
+
+                $model = new $modelClass();
+                $model->addLog(
+                    [[
+                        'action'    => $message['tool'],
+                        'id'        => $message['target'],
+                        'title'     => $message['tool'],
+                        'itemlink'  => '',
+                        'extension' => 'com_mcpserver',
+                    ]],
+                    $messageKey,
+                    $context,
+                    $userId
+                );
+            });
+        });
+
         // MCPB bundle builder
         $container->share(McpbService::class, function () {
             return new McpbService(ComponentHelper::getParams('com_mcpserver'));
         });
 
-        // REST client
-        $container->share(RestClient::class, function (Container $container) {
-            $params = ComponentHelper::getParams('com_mcpserver');
-            $baseUrl = rtrim((string) $params->get('base_url', ''), '/');
-            $apiToken = (string) $params->get('api_token', '');
-            $verifySsl = (bool) $params->get('verify_ssl', true);
-            $resolveIp = trim((string) $params->get('resolve_ip', ''));
-
-            if ($baseUrl === '') {
-                $baseUrl = rtrim(Uri::root(), '/');
-            }
-
-            if ($baseUrl !== '' && !preg_match('#^https?://#i', $baseUrl)) {
-                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
-                $baseUrl = $scheme . '://' . $host . '/' . ltrim($baseUrl, '/');
-            }
-
-            return new RestClient(
-                $baseUrl,
-                $apiToken ?: null,
-                $container->get(LoggerInterface::class),
-                $verifySsl,
-                $resolveIp !== '' ? $resolveIp : null
+        // REST client factory: builds a RestClient against the configured base
+        // URL/SSL/resolve settings, either with the shared configured token or
+        // (in governed mode) with an individual authenticated principal's own
+        // Joomla API token.
+        $container->share(RestClientFactory::class, function (Container $container) {
+            return new RestClientFactory(
+                ComponentHelper::getParams('com_mcpserver'),
+                $container->get(LoggerInterface::class)
             );
+        });
+
+        // REST client (shared/legacy token)
+        $container->share(RestClient::class, function (Container $container) {
+            return $container->get(RestClientFactory::class)->createShared();
         });
 
         // Cache service

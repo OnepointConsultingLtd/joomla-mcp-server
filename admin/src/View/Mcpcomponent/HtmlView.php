@@ -28,6 +28,9 @@ class HtmlView extends BaseHtmlView
      */
     public $mcpConfig;
 
+    /** @var bool */
+    public bool $governedMode = false;
+
     /**
      * Display the view
      *
@@ -39,7 +42,9 @@ class HtmlView extends BaseHtmlView
         ToolbarHelper::title('MCP Server', 'mcp');
         ToolbarHelper::preferences('com_mcpserver');
         
-        $this->mcpConfig = $this->generateMcpConfig();
+        $params = ComponentHelper::getParams('com_mcpserver');
+        $this->governedMode = (bool) $params->get('governed_mode', 0);
+        $this->mcpConfig = $this->generateMcpConfig($params);
         
         parent::display($tpl);
     }
@@ -49,9 +54,8 @@ class HtmlView extends BaseHtmlView
      *
      * @return array
      */
-    private function generateMcpConfig(): array
+    private function generateMcpConfig(\Joomla\Registry\Registry $params): array
     {
-        $params = ComponentHelper::getParams('com_mcpserver');
         $rpcUrl = $this->getMcpbService()->endpointUrl();
         $token = (string) $params->get('mcp_bearer_token', '');
         
@@ -67,11 +71,13 @@ class HtmlView extends BaseHtmlView
         ];
 
         // Pass the bearer token through an env var so it stays out of the args list.
-        if ($params->get('require_auth', 0) && $token !== '') {
+        if ($this->governedMode || ($params->get('require_auth', 0) && $token !== '')) {
             $server['args'][] = '--header';
             $server['args'][] = 'Authorization:${AUTH_HEADER}';
             $server['env'] = [
-                'AUTH_HEADER' => 'Bearer <YOUR_TOKEN>',
+                'AUTH_HEADER' => $this->governedMode
+                    ? 'Bearer <YOUR_GOVERNED_CREDENTIAL>'
+                    : 'Bearer <YOUR_TOKEN>',
             ];
         }
 
@@ -91,8 +97,8 @@ class HtmlView extends BaseHtmlView
         return [
             'json' => json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
             'url' => $rpcUrl,
-            'token' => $token,
-            'maskedToken' => $maskedToken,
+            'token' => $this->governedMode ? '' : $token,
+            'maskedToken' => $this->governedMode ? '' : $maskedToken,
         ];
     }
 

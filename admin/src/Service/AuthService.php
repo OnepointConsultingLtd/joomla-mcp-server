@@ -18,26 +18,59 @@ use Joomla\Registry\Registry;
 class AuthService
 {
     private Registry $config;
+    private ?GovernedAuthService $governedAuthService;
 
-    public function __construct(Registry $config)
+    private bool $resolved = false;
+
+    /** @var AuthenticatedPrincipal|array{error:string,code:int}|null */
+    private AuthenticatedPrincipal|array|null $resolvedResult = null;
+
+    public function __construct(Registry $config, ?GovernedAuthService $governedAuthService = null)
     {
         $this->config = $config;
+        $this->governedAuthService = $governedAuthService;
     }
 
     public function authenticate(): ?array
     {
-        $app = Factory::getApplication();
-        $input = $app->input;
+        $result = $this->resolve();
 
-        $mcpToken = $this->config->get('mcp_bearer_token', '');
+        return $result instanceof AuthenticatedPrincipal ? null : $result;
+    }
+
+    public function authenticatePrincipal(): ?AuthenticatedPrincipal
+    {
+        $result = $this->resolve();
+
+        return $result instanceof AuthenticatedPrincipal ? $result : null;
+    }
+
+    /**
+     * Memoized: callers (RpcHandlerTrait::handle()/sse()) call
+     * authenticatePrincipal() then, on a null principal, authenticate() —
+     * both must observe the same single authentication attempt rather than
+     * re-running governed-credential verification (and its touchLastUsed
+     * side effect) or legacy token comparison a second time per request.
+     *
+     * @return AuthenticatedPrincipal|array{error:string,code:int}|null
+     */
+    private function resolve(): AuthenticatedPrincipal|array|null
+    {
+        if ($this->resolved) {
+            return $this->resolvedResult;
+        }
+
+        $this->resolved = true;
+
+        return $this->resolvedResult = $this->doResolve();
+    }
+
+    /**
+     * @return AuthenticatedPrincipal|array{error:string,code:int}|null
+     */
+    private function doResolve(): AuthenticatedPrincipal|array|null
+    {
         $ipAllowList = array_filter(array_map('trim', explode(',', $this->config->get('ip_allow_list', ''))));
-
-        // Fail closed. Joomla only persists config.xml field defaults (require_auth
-        // defaults to 1 there) once an admin saves the options; until then
-        // ComponentHelper::getParams() returns an empty registry. A fallback of
-        // false would leave the public endpoint unauthenticated on a fresh install,
-        // so default to requiring auth when the param has never been stored.
-        $requireAuth = (bool) $this->config->get('require_auth', true);
 
         if (!empty($ipAllowList)) {
             $remoteIp = $this->getClientIp();
@@ -45,6 +78,33 @@ class AuthService
                 return ['error' => 'IP not allowed', 'code' => JsonRpc::FORBIDDEN];
             }
         }
+
+        $governedMode = (bool) $this->config->get('governed_mode', false);
+
+        if ($governedMode) {
+            if ($this->governedAuthService === null) {
+                return ['error' => 'Governed authentication is not configured', 'code' => JsonRpc::FORBIDDEN];
+            }
+
+            return $this->governedAuthService->authenticate();
+        }
+
+        return $this->authenticateLegacy();
+    }
+
+    private function authenticateLegacy(): ?array
+    {
+        $app = Factory::getApplication();
+        $input = $app->input;
+
+        $mcpToken = $this->config->get('mcp_bearer_token', '');
+
+        // Fail closed. Joomla only persists config.xml field defaults (require_auth
+        // defaults to 1 there) once an admin saves the options; until then
+        // ComponentHelper::getParams() returns an empty registry. A fallback of
+        // false would leave the public endpoint unauthenticated on a fresh install,
+        // so default to requiring auth when the param has never been stored.
+        $requireAuth = (bool) $this->config->get('require_auth', true);
 
         if ($requireAuth) {
             if (empty($mcpToken)) {

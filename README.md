@@ -143,7 +143,7 @@ Article versioning tools require Joomla article versioning to be enabled.
 |---|---|
 | `list_template_files` | List editable source files of an installed template (Joomla's "Customise" view) |
 | `get_template_file` | Read the source of a single template file |
-| `update_template_file` | Overwrite the source of an existing template file |
+| `update_template_file` | Write the source of a template file, creating it if its parent directory exists |
 | `create_template_override` | Create a template override by copying a core view, module, plugin or layout into the template |
 
 ### Extensions

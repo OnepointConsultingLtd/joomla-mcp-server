@@ -2474,10 +2474,14 @@ class RpcService
             throw new \InvalidArgumentException('path and source are required');
         }
 
-        $path = $this->safeTemplatePath($this->templateBasePath($template, $media), $relative);
+        // safeTemplatePath() has already established that the parent directory
+        // exists and sits inside the template, so a missing file here is a new
+        // one to create — e.g. a second layout in an existing override folder.
+        $path   = $this->safeTemplatePath($this->templateBasePath($template, $media), $relative);
+        $isNew  = !file_exists($path);
 
-        if (!is_file($path)) {
-            throw new \InvalidArgumentException('File not found (create an override first): ' . $relative);
+        if (!$isNew && !is_file($path)) {
+            throw new \InvalidArgumentException('Path is not a file: ' . $relative);
         }
 
         if (!$this->templateExtensionAllowed($path)) {
@@ -2491,7 +2495,9 @@ class RpcService
             throw new \InvalidArgumentException('joomla.asset.json must contain valid JSON');
         }
 
-        if (!is_writable($path) || file_put_contents($path, $source) === false) {
+        $writable = $isNew ? is_writable(\dirname($path)) : is_writable($path);
+
+        if (!$writable || file_put_contents($path, $source) === false) {
             throw new \RuntimeException('Failed to write file (check permissions): ' . $relative);
         }
 
@@ -2499,6 +2505,7 @@ class RpcService
             'extension_id'  => $template->extension_id,
             'template'      => $template->element,
             'path'          => $relative,
+            'created'       => $isNew,
             'bytes_written' => strlen($source),
         ];
     }
@@ -2605,7 +2612,15 @@ class RpcService
         $realBase = realpath($base) ?: $base;
         $parent   = realpath(\dirname($path));
 
-        if ($parent === false || ($parent !== $realBase && !str_starts_with($parent, $realBase . '/'))) {
+        // '..' is rejected above, so an unresolvable parent means the directory
+        // is simply absent — say so rather than implying a traversal attempt.
+        if ($parent === false) {
+            throw new \InvalidArgumentException(
+                'Directory does not exist: ' . trim(\dirname('/' . ltrim($relative, '/')), '/')
+            );
+        }
+
+        if ($parent !== $realBase && !str_starts_with($parent, $realBase . '/')) {
             throw new \InvalidArgumentException('Path is outside the template directory');
         }
 

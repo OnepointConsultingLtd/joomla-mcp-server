@@ -20,6 +20,12 @@ if (!defined('JPATH_SITE')) {
     define('JPATH_SITE', '/tmp/site');
 }
 
+// A real, writable directory: tests that exercise file operations (template
+// files, overrides) create and tear down their own trees underneath it.
+if (!defined('JPATH_ROOT')) {
+    define('JPATH_ROOT', sys_get_temp_dir() . '/com-mcpserver-tests-' . getmypid());
+}
+
 require __DIR__ . '/Stubs/joomla.php';
 
 $autoload = dirname(__DIR__) . '/admin/vendor/autoload.php';

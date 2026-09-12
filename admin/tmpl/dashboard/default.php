@@ -42,6 +42,72 @@ $statusBadge = static function (string $status): string {
     }
 };
 
+// A restricted viewer sees only their own rows, so the generic "no requests
+// recorded yet" would assert something about the whole site that this page
+// never queried.
+$noDataText = $this->scopeUserId === null
+    ? Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA')
+    : Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA_OWN');
+
+// Tool Name filter choices, grouped so a filter that returns nothing explains
+// itself: the column holds prompt names as well as tool names, a disabled
+// entry can still have older rows, and an unregistered one is a name this
+// build no longer knows. A lone "available" group carries no information, so
+// it renders as a flat list rather than a one-label optgroup.
+$toolOptions = $this->toolFilterOptions;
+$toolGroupsAreMixed = $toolOptions['prompts'] !== []
+    || $toolOptions['disabled'] !== []
+    || $toolOptions['unregistered'] !== [];
+
+$toolFilterGroups = [];
+
+if ($toolOptions['available'] !== []) {
+    $toolFilterGroups[] = [
+        'label' => $toolGroupsAreMixed ? Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL_AVAILABLE') : null,
+        'names' => $toolOptions['available'],
+    ];
+}
+
+if ($toolOptions['prompts'] !== []) {
+    $toolFilterGroups[] = [
+        'label' => Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL_PROMPTS'),
+        'names' => $toolOptions['prompts'],
+    ];
+}
+
+if ($toolOptions['disabled'] !== []) {
+    $toolFilterGroups[] = [
+        'label' => Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL_DISABLED'),
+        'names' => $toolOptions['disabled'],
+    ];
+}
+
+if ($toolOptions['unregistered'] !== []) {
+    $toolFilterGroups[] = [
+        'label' => Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL_UNREGISTERED'),
+        'names' => $toolOptions['unregistered'],
+    ];
+}
+
+// How an account is named in the User filter and the User column. The audit
+// trail's job is attribution, so an account deleted from Joomla since the row
+// was written must still be identifiable: fall back to its id rather than an
+// anonymous "Unavailable", which would lose the only identifier left.
+$auditUserLabel = static function (array $user): string {
+    $name = $user['user_name'] ?? null;
+
+    return $name !== null && $name !== ''
+        ? $name
+        : Text::sprintf('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_DELETED', (int) $user['user_id']);
+};
+
+$toolOptionTag = static function (string $name, ?string $selected): string {
+    return '<option value="' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '"'
+        . ($name === $selected ? ' selected' : '') . '>'
+        . htmlspecialchars($name, ENT_QUOTES, 'UTF-8')
+        . '</option>';
+};
+
 $cards = [
     ['label' => Text::_('COM_MCPSERVER_DASHBOARD_CARD_TOTAL'),        'value' => number_format((int) $summary['total'])],
     ['label' => Text::_('COM_MCPSERVER_DASHBOARD_CARD_24H'),          'value' => number_format((int) $summary['last_24h'])],
@@ -107,6 +173,12 @@ $cards = [
         </div>
     <?php endif; ?>
 
+    <?php if ($this->scopeUserId !== null) : ?>
+        <div class="alert alert-info" role="alert">
+            <?php echo Text::_('COM_MCPSERVER_DASHBOARD_SCOPE_OWN_ONLY'); ?>
+        </div>
+    <?php endif; ?>
+
     <div class="row row-cols-2 row-cols-md-4 row-cols-xl-7 g-3 mb-4">
         <?php foreach ($cards as $card) : ?>
             <div class="col">
@@ -126,7 +198,7 @@ $cards = [
         </div>
         <div class="card-body">
             <?php if ($maxDay === 0) : ?>
-                <p class="text-muted mb-0"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA'); ?></p>
+                <p class="text-muted mb-0"><?php echo $noDataText; ?></p>
             <?php else : ?>
                 <div class="d-flex align-items-end justify-content-between" style="height: 180px; gap: 4px;">
                     <?php foreach ($this->perDay as $point) :
@@ -163,7 +235,7 @@ $cards = [
                 <div class="card-header"><h5 class="mb-0"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_TOP_TOOLS'); ?></h5></div>
                 <div class="card-body p-0">
                     <?php if (empty($this->topTools)) : ?>
-                        <p class="text-muted m-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA'); ?></p>
+                        <p class="text-muted m-3"><?php echo $noDataText; ?></p>
                     <?php else : ?>
                         <table class="table table-hover mb-0">
                             <thead><tr><th class="ps-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TOOL'); ?></th><th class="text-end pe-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COUNT'); ?></th></tr></thead>
@@ -185,7 +257,7 @@ $cards = [
                 <div class="card-header"><h5 class="mb-0"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_TOP_METHODS'); ?></h5></div>
                 <div class="card-body p-0">
                     <?php if (empty($this->topMethods)) : ?>
-                        <p class="text-muted m-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA'); ?></p>
+                        <p class="text-muted m-3"><?php echo $noDataText; ?></p>
                     <?php else : ?>
                         <table class="table table-hover mb-0">
                             <thead><tr><th class="ps-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_METHOD'); ?></th><th class="text-end pe-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COUNT'); ?></th></tr></thead>
@@ -214,13 +286,46 @@ $cards = [
                     <form action="index.php?option=com_mcpserver&amp;view=dashboard" method="get" class="row gy-2 gx-2 align-items-end mb-3">
                         <input type="hidden" name="option" value="com_mcpserver">
                         <input type="hidden" name="view" value="dashboard">
-                        <div class="col-auto">
-                            <label class="form-label" for="audit_user_id"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_USER'); ?></label>
-                            <input type="number" class="form-control" id="audit_user_id" name="audit_user_id" value="<?php echo $this->auditFilters['userId'] !== null ? (int) $this->auditFilters['userId'] : ''; ?>" min="1" style="max-width: 140px;">
-                        </div>
+                        <?php // Only a Super User can filter by user: everyone else is already restricted to their own rows. ?>
+                        <?php if ($this->scopeUserId === null) : ?>
+                            <div class="col-auto">
+                                <label class="form-label" for="audit_user_id"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_USER'); ?></label>
+                                <?php if ($this->auditUsers === []) : ?>
+                                    <?php // No attributed rows yet, or the lookup failed: keep a usable filter rather than an empty dropdown. ?>
+                                    <input type="number" class="form-control" id="audit_user_id" name="audit_user_id" value="<?php echo $this->auditFilters['userId'] !== null ? (int) $this->auditFilters['userId'] : ''; ?>" min="1" style="max-width: 140px;">
+                                <?php else : ?>
+                                    <select class="form-select" id="audit_user_id" name="audit_user_id" style="max-width: 220px;">
+                                        <option value=""><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_USER_ANY'); ?></option>
+                                        <?php foreach ($this->auditUsers as $auditUser) : ?>
+                                            <option value="<?php echo (int) $auditUser['user_id']; ?>"<?php echo (int) $auditUser['user_id'] === (int) $this->auditFilters['userId'] ? ' selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($auditUserLabel($auditUser), ENT_QUOTES, 'UTF-8'); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
                         <div class="col-auto">
                             <label class="form-label" for="audit_tool"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL'); ?></label>
-                            <input type="text" class="form-control" id="audit_tool" name="audit_tool_name" value="<?php echo htmlspecialchars((string) $this->auditFilters['toolName'], ENT_QUOTES, 'UTF-8'); ?>" style="max-width: 200px;">
+                            <?php if ($toolFilterGroups === []) : ?>
+                                <?php // The registry could not be read; fall back to free text rather than an empty dropdown that can filter nothing. ?>
+                                <input type="text" class="form-control" id="audit_tool" name="audit_tool_name" value="<?php echo htmlspecialchars((string) $this->auditFilters['toolName'], ENT_QUOTES, 'UTF-8'); ?>" style="max-width: 200px;">
+                            <?php else : ?>
+                                <select class="form-select" id="audit_tool" name="audit_tool_name" style="max-width: 240px;">
+                                    <option value=""><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_TOOL_ANY'); ?></option>
+                                    <?php foreach ($toolFilterGroups as $group) : ?>
+                                        <?php if ($group['label'] !== null) : ?>
+                                            <optgroup label="<?php echo htmlspecialchars($group['label'], ENT_QUOTES, 'UTF-8'); ?>">
+                                        <?php endif; ?>
+                                        <?php foreach ($group['names'] as $toolOptionName) : ?>
+                                            <?php echo $toolOptionTag($toolOptionName, $this->auditFilters['toolName']); ?>
+                                        <?php endforeach; ?>
+                                        <?php if ($group['label'] !== null) : ?>
+                                            </optgroup>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </select>
+                            <?php endif; ?>
                         </div>
                         <div class="col-auto">
                             <label class="form-label" for="audit_date_from"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_FILTER_FROM'); ?></label>
@@ -237,8 +342,12 @@ $cards = [
                 </div>
             <?php endif; ?>
 
-            <?php if (empty($this->recent)) : ?>
-                <p class="text-muted m-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_NO_DATA'); ?></p>
+            <?php if ($this->auditError !== null) : ?>
+                <div class="alert alert-danger m-3" role="alert">
+                    <?php echo $this->auditError; ?>
+                </div>
+            <?php elseif (empty($this->recent)) : ?>
+                <p class="text-muted m-3"><?php echo $noDataText; ?></p>
             <?php elseif ($this->canViewAudit) : ?>
                 <div class="table-responsive">
                     <table class="table table-hover table-sm mb-0 align-middle">
@@ -249,7 +358,6 @@ $cards = [
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TOOL'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_STATUS'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_COL_USER_NAME'); ?></th>
-                                <th><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_COL_USER'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_COL_SELECTOR'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_COL_TARGET'); ?></th>
                                 <th class="pe-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_IP'); ?></th>
@@ -262,8 +370,14 @@ $cards = [
                                     <td><code><?php echo htmlspecialchars((string) ($row['method'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code></td>
                                     <td><?php echo htmlspecialchars((string) ($row['tool_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><span class="badge <?php echo $statusBadge((string) ($row['status'] ?? '')); ?>"><?php echo htmlspecialchars((string) ($row['status'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></td>
-                                    <td><?php echo htmlspecialchars((string) ($row['user_name'] ?? Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_UNAVAILABLE')), ENT_QUOTES, 'UTF-8'); ?></td>
-                                    <td><?php echo htmlspecialchars((string) ($row['user_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td>
+                                        <?php if (($row['user_id'] ?? null) === null) : ?>
+                                            <?php // No principal was resolved: legacy shared-token mode, or a failure before authentication. Not the same as an unknown name. ?>
+                                            <span class="text-muted" title="<?php echo htmlspecialchars(Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_UNATTRIBUTED_DESC'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_UNATTRIBUTED'); ?></span>
+                                        <?php else : ?>
+                                            <?php echo htmlspecialchars($auditUserLabel($row), ENT_QUOTES, 'UTF-8'); ?>
+                                        <?php endif; ?>
+                                    </td>
                                     <td><code><?php echo htmlspecialchars((string) ($row['credential_selector'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code></td>
                                     <td><code><?php echo htmlspecialchars((string) ($row['target'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code></td>
                                     <td class="pe-3"><?php echo htmlspecialchars((string) ($row['client_ip'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
@@ -308,9 +422,9 @@ $cards = [
             <?php if ($this->isCoreAdmin) : ?>
                 <div class="p-3 border-top">
                     <p class="text-muted small mb-2"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_PRUNE_DESC'); ?></p>
-                    <form action="index.php?option=com_mcpserver&amp;task=credentials.prune" method="post" class="d-flex gap-2 align-items-end" onsubmit="return confirm(<?php echo json_encode(Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_PRUNE_CONFIRM')); ?>);">
+                    <form action="index.php?option=com_mcpserver&amp;task=credentials.prune" method="post" class="d-flex gap-2 align-items-end" onsubmit="return confirm(<?php echo htmlspecialchars(json_encode(Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_PRUNE_CONFIRM')), ENT_QUOTES, 'UTF-8'); ?>);">
                         <div>
-                            <label class="form-label" for="prune_retention_days"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_RETENTION_LABEL'); ?></label>
+                            <label class="form-label" for="prune_retention_days"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_PRUNE_OLDER_THAN_LABEL'); ?></label>
                             <input type="number" class="form-control" id="prune_retention_days" name="prune_retention_days" value="360" min="1" max="3650" style="max-width: 160px;">
                         </div>
                         <button type="submit" class="btn btn-outline-danger"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_PRUNE_BUTTON'); ?></button>

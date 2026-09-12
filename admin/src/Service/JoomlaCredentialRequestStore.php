@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * @package     MCP Server for Joomla
+ * @copyright   Copyright (C) 2026 Onepoint Consulting Ltd
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
 declare(strict_types=1);
 
 namespace Joomla\Component\Mcpserver\Administrator\Service;
@@ -54,12 +60,12 @@ final class JoomlaCredentialRequestStore implements CredentialRequestStoreInterf
 
     public function listForUser(int $userId): array
     {
-        return $this->listByCondition($this->db->quoteName('user_id') . ' = ' . $userId);
+        return $this->listByCondition($this->db->quoteName('r.user_id') . ' = ' . $userId);
     }
 
     public function listPending(): array
     {
-        return $this->listByCondition($this->db->quoteName('status') . ' = ' . $this->db->quote('requested'));
+        return $this->listByCondition($this->db->quoteName('r.status') . ' = ' . $this->db->quote('requested'));
     }
 
     public function decide(string $id, string $status, int $actorId, ?int $expiresAt, int $decidedAt): void
@@ -94,7 +100,12 @@ final class JoomlaCredentialRequestStore implements CredentialRequestStoreInterf
                 ])
                 ->where($db->quoteName('id') . ' = ' . (int) $id)
                 ->where($db->quoteName('status') . ' = ' . $db->quote('approved'))
-                ->where($db->quoteName('credential_expires') . ' > ' . $db->quote(self::utc($claimedAt)));
+                // NULL means the approver granted a non-expiring credential, so
+                // it must stay claimable; only a real past timestamp blocks it.
+                ->where(
+                    '(' . $db->quoteName('credential_expires') . ' IS NULL OR '
+                    . $db->quoteName('credential_expires') . ' > ' . $db->quote(self::utc($claimedAt)) . ')'
+                );
             $db->setQuery($query)->execute();
             $this->requireAffectedRow();
             $this->insertEvent($id, 'claimed', (int) $credential['owner_id'], $claimedAt);
@@ -107,9 +118,13 @@ final class JoomlaCredentialRequestStore implements CredentialRequestStoreInterf
     {
         $db = $this->db;
         $token = $credential['encrypted_token'];
+        // A null expires_at is stored as SQL NULL, which
+        // GovernedCredentialAuthenticator treats as "never expires".
+        $expires = $credential['expires_at'] === null ? 'NULL' : $db->quote(self::utc($credential['expires_at']));
+
         $query = $db->getQuery(true)->insert($db->quoteName(self::CREDENTIAL_TABLE))
             ->columns($db->quoteName(['selector', 'user_id', 'name', 'verifier', 'token_ciphertext', 'token_nonce', 'token_tag', 'key_version', 'status', 'created', 'expires']))
-            ->values(implode(',', [$db->quote($credential['selector']), $credential['owner_id'], $db->quote($credential['owner_name']), $db->quote($credential['verifier']), $db->quote($token['ciphertext']), $db->quote($token['nonce']), $db->quote($token['tag']), $token['key_version'], $db->quote('active'), $db->quote(self::utc($credential['created_at'])), $db->quote(self::utc($credential['expires_at']))]));
+            ->values(implode(',', [$db->quote($credential['selector']), $credential['owner_id'], $db->quote($credential['owner_name']), $db->quote($credential['verifier']), $db->quote($token['ciphertext']), $db->quote($token['nonce']), $db->quote($token['tag']), $token['key_version'], $db->quote('active'), $db->quote(self::utc($credential['created_at'])), $expires]));
         $db->setQuery($query)->execute();
 
         return (string) $db->insertid();
@@ -147,25 +162,47 @@ final class JoomlaCredentialRequestStore implements CredentialRequestStoreInterf
         }
     }
 
-    /** @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string}> */
+    /**
+     * @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string,username:?string,user_name:?string}>
+     *
+     * LEFT JOIN, not INNER: approving a request is a security decision, so a
+     * request whose owner has since been deleted must still be listed (and
+     * visibly refusable) rather than silently vanishing from the queue. The
+     * caller falls back to the user id when username is null.
+     */
     private function listByCondition(string $condition): array
     {
         $db = $this->db;
         $query = $db->getQuery(true)
-            ->select($db->quoteName(['id', 'user_id', 'client_name', 'status', 'credential_expires', 'credential_id']))
-            ->from($db->quoteName(self::REQUEST_TABLE))
+            ->select(
+                $db->quoteName([
+                    'r.id', 'r.user_id', 'r.client_name', 'r.status', 'r.credential_expires', 'r.credential_id',
+                ])
+            )
+            ->select(
+                [
+                    $db->quoteName('u.username', 'username'),
+                    $db->quoteName('u.name', 'user_name'),
+                ]
+            )
+            ->from($db->quoteName(self::REQUEST_TABLE, 'r'))
+            ->join('LEFT', $db->quoteName('#__users', 'u'), $db->quoteName('u.id') . ' = ' . $db->quoteName('r.user_id'))
             ->where($condition);
 
         return array_map(self::metadata(...), $db->setQuery($query)->loadAssocList() ?? []);
     }
 
-    /** @return array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string} */
+    /**
+     * @return array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string,username:?string,user_name:?string}
+     */
     private static function metadata(array $row): array
     {
         return [
             'id' => (string) $row['id'], 'user_id' => (int) $row['user_id'], 'client_name' => (string) $row['client_name'],
             'status' => (string) $row['status'], 'credential_expires' => self::timestamp($row['credential_expires']),
             'credential_id' => $row['credential_id'] === null ? null : (string) $row['credential_id'],
+            'username' => isset($row['username']) && $row['username'] !== '' ? (string) $row['username'] : null,
+            'user_name' => isset($row['user_name']) && $row['user_name'] !== '' ? (string) $row['user_name'] : null,
         ];
     }
 

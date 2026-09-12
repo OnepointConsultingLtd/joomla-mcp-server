@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * @package     MCP Server for Joomla
+ * @copyright   Copyright (C) 2026 Onepoint Consulting Ltd
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
 declare(strict_types=1);
 
 namespace Joomla\Component\Mcpserver\Administrator\Service;
@@ -13,10 +19,10 @@ interface CredentialRequestStoreInterface
     /** @return array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string}|null */
     public function find(string $id): ?array;
 
-    /** @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string}> */
+    /** @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string,username:?string,user_name:?string}> */
     public function listForUser(int $userId): array;
 
-    /** @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string}> */
+    /** @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string,username:?string,user_name:?string}> */
     public function listPending(): array;
 
     public function decide(string $id, string $status, int $actorId, ?int $expiresAt, int $decidedAt): void;

@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * @package     MCP Server for Joomla
+ * @copyright   Copyright (C) 2026 Onepoint Consulting Ltd
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
 declare(strict_types=1);
 
 namespace Joomla\Component\Mcpserver\Tests\Unit;
@@ -15,9 +21,11 @@ class GovernanceSetupServiceTest extends TestCase
 
     /**
      * @param array<string,mixed> $initialParams
+     * @param int $credentialCount Stored credentials; enable() refuses to mint a
+     *                             first salt while any exist.
      * @return array{service: GovernanceSetupService, getPersisted: callable(): ?array<string,mixed>}
      */
-    private function makeService(array $initialParams): array
+    private function makeService(array $initialParams, int $credentialCount = 0): array
     {
         $store = $initialParams;
         $persisted = null;
@@ -31,6 +39,7 @@ class GovernanceSetupServiceTest extends TestCase
                 $store = array_merge($store, $params);
             },
             static fn (): string => self::SITE_SECRET,
+            static fn (): int => $credentialCount,
         );
 
         return [
@@ -50,12 +59,11 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $service->enable(90);
+        $service->enable();
 
         $persisted = ($refs['getPersisted'])();
         $this->assertNotNull($persisted);
         $this->assertSame(0, $persisted['governed_mode'], 'enable() must not force governed_mode on');
-        $this->assertSame(90, $persisted['metrics_retention_days']);
         $this->assertIsString($persisted['credential_salt']);
         $decoded = base64_decode($persisted['credential_salt'], true);
         $this->assertNotFalse($decoded);
@@ -71,7 +79,7 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $service->enable(45);
+        $service->enable();
 
         $persisted = ($refs['getPersisted'])();
         $this->assertSame(1, $persisted['governed_mode'], 'enable() must not disable an already-active governed mode');
@@ -86,7 +94,7 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $service->enable(30);
+        $service->enable();
 
         $status = $service->status();
         $this->assertTrue($status['salt_valid'], 'the salt must be provisioned so credentials can already be issued/encrypted');
@@ -104,14 +112,17 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $service->enable(365);
+        $service->enable();
 
         $persisted = ($refs['getPersisted'])();
         $this->assertSame($existingSalt, $persisted['credential_salt']);
     }
 
-    public function testEnableReplacesInvalidSaltOnly(): void
+    public function testEnableRefusesToReplaceAnUnreadableStoredSalt(): void
     {
+        // Replacing a present-but-unparseable salt silently orphans every
+        // stored token_ciphertext, so enable() must refuse rather than mint a
+        // fresh one and report success.
         $refs = $this->makeService([
             'governed_mode' => 0,
             'credential_salt' => 'not valid base64!!',
@@ -119,17 +130,69 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $service->enable(30);
+        try {
+            $service->enable();
+            $this->fail('enable() should refuse to overwrite an unreadable salt');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('already stored', $e->getMessage());
+        }
+
+        $this->assertNull(($refs['getPersisted'])(), 'nothing may be persisted on refusal');
+    }
+
+    public function testEnableRefusesToMintAFirstSaltWhileCredentialsExist(): void
+    {
+        $refs = $this->makeService([
+            'governed_mode' => 0,
+            'credential_salt' => null,
+            'metrics_retention_days' => 7,
+        ], 3);
+        $service = $refs['service'];
+
+        try {
+            $service->enable();
+            $this->fail('enable() should refuse to mint a salt that orphans credentials');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Credentials already exist', $e->getMessage());
+        }
+
+        $this->assertNull(($refs['getPersisted'])(), 'nothing may be persisted on refusal');
+    }
+
+    public function testEnableRefusesWhenParamsCannotBeRead(): void
+    {
+        // An empty read must not be mistaken for governed_mode = 0, which would
+        // silently revert the site to shared-token mode with a success message.
+        $refs = $this->makeService([]);
+        $service = $refs['service'];
+
+        $this->expectException(\RuntimeException::class);
+        $service->enable();
+    }
+
+    public function testEnableGeneratesAFirstSaltWhenNoCredentialsExist(): void
+    {
+        $refs = $this->makeService([
+            'governed_mode' => 0,
+            'credential_salt' => null,
+            'metrics_retention_days' => 7,
+        ]);
+        $service = $refs['service'];
+
+        $service->enable();
 
         $persisted = ($refs['getPersisted'])();
-        $this->assertNotSame('not valid base64!!', $persisted['credential_salt']);
         $decoded = base64_decode($persisted['credential_salt'], true);
         $this->assertNotFalse($decoded);
         $this->assertSame(32, strlen($decoded));
     }
 
-    public function testEnableRejectsRetentionDaysBelowRangeAndDoesNotPersist(): void
+    public function testEnableLeavesMetricsRetentionUntouched(): void
     {
+        // metrics_retention_days has a single home: Options > Monitoring &
+        // Metrics. Salt provisioning must not write a second copy of it, or
+        // pressing the setup button would silently reset the operator's
+        // configured retention window to whatever the setup form defaulted to.
         $refs = $this->makeService([
             'governed_mode' => 0,
             'credential_salt' => null,
@@ -137,31 +200,15 @@ class GovernanceSetupServiceTest extends TestCase
         ]);
         $service = $refs['service'];
 
-        $this->expectException(\InvalidArgumentException::class);
+        $service->enable();
 
-        try {
-            $service->enable(0);
-        } finally {
-            $this->assertNull(($refs['getPersisted'])());
-        }
-    }
-
-    public function testEnableRejectsRetentionDaysAboveRangeAndDoesNotPersist(): void
-    {
-        $refs = $this->makeService([
-            'governed_mode' => 0,
-            'credential_salt' => null,
-            'metrics_retention_days' => 7,
-        ]);
-        $service = $refs['service'];
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        try {
-            $service->enable(3651);
-        } finally {
-            $this->assertNull(($refs['getPersisted'])());
-        }
+        $persisted = ($refs['getPersisted'])();
+        $this->assertNotNull($persisted);
+        $this->assertArrayNotHasKey(
+            'metrics_retention_days',
+            $persisted,
+            'enable() must not persist a retention window; that setting is owned by the component options.'
+        );
     }
 
     public function testStatusReportsConfiguredWhenGovernedActiveAndSaltValid(): void

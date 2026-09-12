@@ -35,7 +35,7 @@ class RestClientFactory
 
     public function createForPrincipal(AuthenticatedPrincipal $principal): RestClient
     {
-        return $this->create($principal->joomlaApiToken);
+        return $this->create($principal->apiToken());
     }
 
     public function createShared(): RestClient

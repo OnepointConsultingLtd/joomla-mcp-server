@@ -71,7 +71,7 @@ final class GovernedAuthServiceTest extends TestCase
 
         $this->assertInstanceOf(AuthenticatedPrincipal::class, $result);
         $this->assertSame(2, $result->userId);
-        $this->assertSame('api-token', $result->joomlaApiToken);
+        $this->assertSame('api-token', $result->apiToken());
     }
 
     public function testMissingAuthorizationHeaderReturnsGenericUnauthorized(): void

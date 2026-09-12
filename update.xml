@@ -7,13 +7,54 @@
         <type>component</type>
         <client>administrator</client>
         <version>1.8.0</version>
-        <infourl title="MCP Server for Joomla 1.8.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.8.1</infourl>
+        <infourl title="MCP Server for Joomla 1.8.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.8.0</infourl>
         <downloads>
-            <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.8.1/com_mcpserver-1.8.1.zip</downloadurl>
+            <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.8.0/com_mcpserver-1.8.0.zip</downloadurl>
         </downloads>
         <tags>
             <tag>stable</tag>
         </tags>
+        <sha256>ec904904ea86ce1f6e04dce08ee5dce01b759d75e6f695f2930ee4900f5928b5</sha256>
+        <targetplatform name="joomla" version="((4\.)|(5\.)|(6\.))" />
+        <php_minimum>8.1</php_minimum>
+        <maintainer>Onepoint Consulting Ltd</maintainer>
+        <maintainerurl>https://www.onepointltd.com</maintainerurl>
+    </update>
+    <update>
+        <name>MCP Server for Joomla</name>
+        <description>Model Context Protocol server component for Joomla</description>
+        <element>com_mcpserver</element>
+        <type>component</type>
+        <client>administrator</client>
+        <version>1.7.1</version>
+        <infourl title="MCP Server for Joomla 1.7.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.7.1</infourl>
+        <downloads>
+            <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.7.1/com_mcpserver-1.7.1.zip</downloadurl>
+        </downloads>
+        <tags>
+            <tag>stable</tag>
+        </tags>
+        <sha256>60e16f88524cf647fce4042918e0f69da0ff1ca12552313754833520bb113100</sha256>
+        <targetplatform name="joomla" version="((4\.)|(5\.)|(6\.))" />
+        <php_minimum>8.1</php_minimum>
+        <maintainer>Onepoint Consulting Ltd</maintainer>
+        <maintainerurl>https://www.onepointltd.com</maintainerurl>
+    </update>
+    <update>
+        <name>MCP Server for Joomla</name>
+        <description>Model Context Protocol server component for Joomla</description>
+        <element>com_mcpserver</element>
+        <type>component</type>
+        <client>administrator</client>
+        <version>1.7.0</version>
+        <infourl title="MCP Server for Joomla 1.7.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.7.0</infourl>
+        <downloads>
+            <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.7.0/com_mcpserver-1.7.0.zip</downloadurl>
+        </downloads>
+        <tags>
+            <tag>stable</tag>
+        </tags>
+        <sha256>83fea13bcfbe149fdf427c9ee81f1e733311e093f4b77b190b039bb29bc5b261</sha256>
         <targetplatform name="joomla" version="((4\.)|(5\.)|(6\.))" />
         <php_minimum>8.1</php_minimum>
         <maintainer>Onepoint Consulting Ltd</maintainer>

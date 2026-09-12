@@ -20,20 +20,22 @@ HTMLHelper::_('bootstrap.tooltip');
 HTMLHelper::_('behavior.core');
 ?>
 <div class="container py-4">
+    <?php
+        // No <h1> here: Joomla already renders the toolbar title set in
+        // Mcpcomponent\HtmlView, and this page was printing the same words
+        // twice. Dashboard and Credentials rely on the toolbar title alone.
+        //
+        // No in-page Dashboard or Options buttons either. Moving between the
+        // component's views belongs in the submenu, and component configuration
+        // belongs in the toolbar; duplicating either here gave the same
+        // destination two routes and was what made the navigation feel
+        // inconsistent. The one in-page entry point that remains is
+        // Manage Credentials below, which cannot live in the submenu because it is
+        // conditional on Governed Mode.
+    ?>
     <div class="row mb-4">
-        <div class="col-md-8">
-            <h1 class="display-5">MCP Server</h1>
+        <div class="col-12">
             <p class="lead"><?php echo Text::_($this->governedMode ? 'COM_MCPSERVER_COMPONENT_INTRO_GOVERNED' : 'COM_MCPSERVER_COMPONENT_INTRO'); ?></p>
-        </div>
-        <div class="col-md-4 text-end">
-            <a class="btn btn-outline-secondary me-1" href="index.php?option=com_mcpserver&amp;view=dashboard">
-                <span class="icon-chart" aria-hidden="true"></span>
-                <?php echo Text::_('COM_MCPSERVER_SUBMENU_DASHBOARD'); ?>
-            </a>
-            <a class="btn btn-primary" href="index.php?option=com_config&amp;view=component&amp;component=com_mcpserver">
-                <span class="icon-options" aria-hidden="true"></span>
-                <?php echo Text::_('JOPTIONS'); ?>
-            </a>
         </div>
     </div>
 

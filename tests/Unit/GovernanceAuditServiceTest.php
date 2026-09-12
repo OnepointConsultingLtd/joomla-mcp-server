@@ -18,6 +18,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Database\QueryInterface;
+use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 
 final class FakeAuditQuery implements QueryInterface
@@ -335,5 +336,55 @@ final class GovernanceAuditServiceTest extends TestCase
 
         $sql = (string) $db->lastQuery;
         $this->assertStringNotContainsString('top-secret-joomla-api-token', $sql);
+    }
+
+    public function testRecordIsSuppressedWhenMetricsAreDisabledAndThereIsNoPrincipal(): void
+    {
+        // metrics_enabled remains the operator's off-switch for plain request
+        // logging, inherited when this service took over the write from
+        // MetricsService.
+        $db = new FakeAuditDatabase();
+        $service = new GovernanceAuditService($db, $this->clock(), new Registry(['metrics_enabled' => 0]));
+
+        $service->record(
+            method: 'tools/call',
+            toolName: 'get_articles',
+            status: 'ok',
+            errorCode: null,
+            httpStatus: 200,
+            durationMs: 15,
+            clientIp: '203.0.113.9',
+            context: 'site',
+        );
+
+        $this->assertFalse($db->executed, 'no row may be written when metrics are disabled');
+    }
+
+    public function testAttributedRequestIsRecordedEvenWhenMetricsAreDisabled(): void
+    {
+        // The audit trail is the whole point of governed mode; it must not be
+        // silently disableable through an unrelated metrics toggle.
+        $db = new FakeAuditDatabase();
+        $service = new GovernanceAuditService($db, $this->clock(), new Registry(['metrics_enabled' => 0]));
+
+        $service->record(
+            method: 'tools/call',
+            toolName: 'update_article',
+            status: 'ok',
+            errorCode: null,
+            httpStatus: 200,
+            durationMs: 15,
+            clientIp: '203.0.113.9',
+            context: 'site',
+            principal: new AuthenticatedPrincipal(
+                credentialId: 7,
+                selector: 'sel-abc',
+                userId: 42,
+                credentialName: 'CI Token',
+                joomlaApiToken: 'super-secret-token-value',
+            ),
+        );
+
+        $this->assertTrue($db->executed, 'an attributed request must always be audited');
     }
 }

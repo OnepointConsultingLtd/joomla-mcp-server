@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * @package     MCP Server for Joomla
+ * @copyright   Copyright (C) 2026 Onepoint Consulting Ltd
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
 declare(strict_types=1);
 
 namespace Joomla\Component\Mcpserver\Tests\Unit;
@@ -88,5 +94,51 @@ final class CredentialRequestServiceTest extends TestCase
         try { $service->approve($id, 42, true, self::NOW + 1); $this->fail('Self approval must fail'); } catch (\RuntimeException) { }
         $this->expectException(\InvalidArgumentException::class);
         $service->approve($id, 7, true, self::NOW);
+    }
+
+    /**
+     * A null expiry is the "never expires" grant. It must survive approval and
+     * still be claimable — the claim path rechecks expiry, and a naive
+     * `credential_expires <= now` guard would reject it, since SQL NULL maps to
+     * 0 in the request metadata.
+     */
+    public function testApproverCanGrantANonExpiringCredentialAndItIsClaimable(): void
+    {
+        $seed = base64_encode('request-owner-seed');
+        $apiToken = base64_encode('sha256:42:' . hash_hmac('sha256', base64_decode($seed, true), 'site-secret'));
+        $store = new RequestServiceStore();
+        $service = new CredentialRequestService(
+            $store,
+            new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
+            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase([$seed, '1']), static fn (): string => 'site-secret'),
+            static fn (): int => self::NOW,
+        );
+
+        $id = $service->request(42, 'Build agent');
+        $service->approve($id, 7, true, null);
+
+        $this->assertSame(0, $store->requests[$id]['credential_expires'], 'never-expires is persisted as null/0');
+
+        $claimed = $service->claim($id, 42, 'Ada Lovelace', $apiToken);
+
+        $this->assertSame('1', $claimed['id']);
+        $this->assertNull(
+            $store->credentials[0]['expires_at'],
+            'the stored credential must carry a null expiry, not epoch 0'
+        );
+    }
+
+    public function testAnExpiryInThePastIsStillRejected(): void
+    {
+        // null means "never"; it must not weaken the check on a real timestamp.
+        $store = new RequestServiceStore();
+        $service = new CredentialRequestService(
+            $store, new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
+            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase(['', '0']), static fn (): string => 'site-secret'), static fn (): int => self::NOW,
+        );
+        $id = $service->request(42, 'Client');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->approve($id, 7, true, self::NOW - 1);
     }
 }

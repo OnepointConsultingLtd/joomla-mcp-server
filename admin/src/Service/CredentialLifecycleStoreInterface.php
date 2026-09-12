@@ -41,7 +41,7 @@ interface CredentialLifecycleStoreInterface
      * List credential metadata for an owner. Must not include the verifier
      * or the encrypted API token.
      *
-     * @return list<array{id:string,owner_id:int,owner_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
+     * @return list<array{id:string,owner_id:int,owner_name:string,client_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
      */
     public function listByOwner(int $ownerId): array;
 
@@ -49,7 +49,7 @@ interface CredentialLifecycleStoreInterface
      * List metadata for all credentials for a Super User administration queue.
      * Must not include the verifier or encrypted API token.
      *
-     * @return list<array{id:string,owner_id:int,owner_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
+     * @return list<array{id:string,owner_id:int,owner_name:string,client_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
      */
     public function listAllMetadata(): array;
 

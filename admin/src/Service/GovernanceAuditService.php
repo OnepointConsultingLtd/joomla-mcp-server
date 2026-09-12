@@ -14,18 +14,27 @@ defined('_JEXEC') or die;
 
 use DateTimeImmutable;
 use Joomla\Database\DatabaseInterface;
+use Joomla\Registry\Registry;
 
 /**
- * Persists one immutable-ish audit row per governed MCP request into
- * #__mcpserver_request_log, attributing it to the AuthenticatedPrincipal
- * that made it when one is available.
+ * Persists exactly one row per MCP request into #__mcpserver_request_log,
+ * attributing it to the AuthenticatedPrincipal that made it when one is
+ * available.
+ *
+ * This is the sole writer for that table. It supersedes MetricsService::record(),
+ * which wrote the same nine base columns and previously ran alongside this
+ * service, producing two rows per request and double-counting every dashboard
+ * figure. MetricsService remains the reader (summary cards, charts, top tools)
+ * and the admin-triggered prune lives in GovernanceAuditRetentionService.
  *
  * Attribution columns (credential_id, user_id, credential_selector) are
  * nullable: requests made under the legacy shared-token mode, or requests
  * that fail authentication before a principal is resolved, are recorded
  * with null attribution rather than being dropped. The row never carries a
- * token, secret, or arbitrary request/response content — only the
- * caller-supplied target identifier, which is sanitised before storage.
+ * token, secret, or arbitrary request/response content — only caller-supplied
+ * identifiers (method, tool name, JSON-RPC request id, target), all of which
+ * are length-bounded and SQL-quoted; `target` is additionally stripped of
+ * control characters.
  */
 final class GovernanceAuditService
 {
@@ -39,12 +48,35 @@ final class GovernanceAuditService
     private const STATUSES = ['ok', 'error', 'blocked', 'auth_failed', 'rate_limited', 'invalid_request'];
 
     /**
-     * @param  callable(): DateTimeImmutable  $clock  Supplies the request timestamp.
+     * @param  callable(): DateTimeImmutable  $clock   Supplies the request timestamp.
+     * @param  Registry|null                  $params  Component params. When null the
+     *                                                 service always records — the default
+     *                                                 keeps unit tests independent of config.
      */
     public function __construct(
         private DatabaseInterface $db,
         private $clock,
+        private ?Registry $params = null,
     ) {
+    }
+
+    /**
+     * Whether a row should be written for this request.
+     *
+     * `metrics_enabled` remains the operator's off-switch for request logging,
+     * inherited from MetricsService so disabling metrics still suppresses rows
+     * exactly as it did before this service took over the write. The one
+     * exception is an attributed request: under governed mode the audit trail
+     * is the feature's entire purpose, so it must not be silently disableable
+     * via an unrelated metrics toggle.
+     */
+    private function shouldRecord(?AuthenticatedPrincipal $principal): bool
+    {
+        if ($principal !== null) {
+            return true;
+        }
+
+        return $this->params === null || (bool) $this->params->get('metrics_enabled', 1);
     }
 
     public function record(
@@ -60,6 +92,10 @@ final class GovernanceAuditService
         ?string $requestId = null,
         ?string $target = null,
     ): void {
+        if (!$this->shouldRecord($principal)) {
+            return;
+        }
+
         $db = $this->db;
 
         $normalisedStatus = in_array($status, self::STATUSES, true) ? $status : '';
@@ -105,6 +141,42 @@ final class GovernanceAuditService
             ->values(implode(',', $values));
 
         $db->setQuery($query)->execute();
+
+        // Opportunistic pruning (~1% of writes) keeps the table bounded without
+        // a cron dependency. Inherited from MetricsService::record(), which used
+        // to own this; it moved here with the write so the behaviour survives.
+        if (random_int(1, 100) === 1) {
+            $this->pruneOpportunistically();
+        }
+    }
+
+    /**
+     * Best-effort trim of rows older than the configured retention window.
+     *
+     * Never throws: a failure to prune must not fail the request that triggered
+     * it, and the admin-triggered GovernanceAuditRetentionService remains the
+     * authoritative, reporting path.
+     */
+    private function pruneOpportunistically(): void
+    {
+        if ($this->params === null) {
+            return;
+        }
+
+        try {
+            $days = max(1, (int) $this->params->get('metrics_retention_days', 360));
+            $cutoff = ($this->clock)()
+                ->modify('-' . $days . ' day')
+                ->format('Y-m-d H:i:s');
+
+            $query = $this->db->getQuery(true)
+                ->delete($this->db->quoteName(self::TABLE))
+                ->where($this->db->quoteName('created') . ' < ' . $this->db->quote($cutoff));
+
+            $this->db->setQuery($query)->execute();
+        } catch (\Throwable) {
+            // Pruning is opportunistic; the retention service reports failures.
+        }
     }
 
     private function quoteNullableInt(?int $value): string

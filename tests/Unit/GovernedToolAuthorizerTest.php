@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * @package     MCP Server for Joomla
+ * @copyright   Copyright (C) 2026 Onepoint Consulting Ltd
+ * @license     GNU General Public License version 2 or later; see LICENSE
+ */
+
 declare(strict_types=1);
 
 namespace Joomla\Component\Mcpserver\Tests\Unit;
@@ -101,13 +107,29 @@ final class GovernedToolAuthorizerTest extends TestCase
         $this->assertSame(['page'], Cache::$cleaned);
     }
 
-    public function testMissingOrDisabledCurrentUserIsDenied(): void
+    public function testMissingCurrentUserIsDenied(): void
     {
+        $this->installCacheEnvironment(['page']);
         $missing = $this->makeGovernedService(null);
-        $disabled = $this->makeGovernedService($this->user(true, [], 1));
 
         $this->assertTrue($this->callTool($missing, 'clear_cache', ['client' => 'site'])['result']['isError']);
+        $this->assertTrue($missing->wasLastCallBlocked());
+        $this->assertSame([], Cache::$cleaned);
+    }
+
+    public function testBlockedUserIsDeniedEvenWithTheRequiredPermission(): void
+    {
+        // Two details make this test load-bearing rather than decorative. The
+        // user holds exactly the permission clear_cache needs, so only the
+        // block check can deny it; and the cache environment is installed, so
+        // a denial cannot be an execution failure in disguise. Asserting
+        // wasLastCallBlocked() pins it to the ACL path specifically.
+        $this->installCacheEnvironment(['page']);
+        $disabled = $this->makeGovernedService($this->user(true, [['core.manage', 'com_cache']], 1));
+
         $this->assertTrue($this->callTool($disabled, 'clear_cache', ['client' => 'site'])['result']['isError']);
+        $this->assertTrue($disabled->wasLastCallBlocked(), 'a blocked account must be denied by the ACL gate');
+        $this->assertSame([], Cache::$cleaned, 'the executor must not have run');
     }
 
     public function testArticleDirectOperationUsesItemAssetAndEditOwnForTheOwner(): void
@@ -217,7 +239,24 @@ final class GovernedToolAuthorizerTest extends TestCase
         $response = $this->callTool($service, 'set_extension_state', ['extension_id' => 1, 'enabled' => 1]);
 
         $this->assertTrue($response['result']['isError']);
-        $this->assertStringContainsString('Only plugin extensions', $response['result']['content'][0]['text']);
+        $this->assertStringContainsString(
+            'only plugin extensions can have their state changed',
+            $response['result']['content'][0]['text']
+        );
+    }
+
+    public function testExtensionStateExecutorAllowsNonPluginInLegacyMode(): void
+    {
+        // The plugin-only restriction exists because GovernedToolAuthorizer can
+        // only resolve an ACL asset for a plugin row. Legacy shared-token mode
+        // has no such mapping, and the tool's schema advertises every extension
+        // type, so the restriction must not leak into it.
+        $service = $this->makeService();
+
+        $response = $this->callTool($service, 'set_extension_state', ['extension_id' => 1, 'enabled' => 1]);
+
+        $text = $response['result']['content'][0]['text'] ?? '';
+        $this->assertStringNotContainsString('only plugin extensions', $text);
     }
 
     public function testModuleEditRequiresAResolvedModule(): void
@@ -455,5 +494,88 @@ final class GovernedToolAuthorizerTest extends TestCase
             public function get(string $key, mixed $default = null): mixed { return $default; }
             public function getDispatcher(): object { return new class { public function dispatch(string $name, object $event): object { return $event; } }; }
         };
+    }
+
+    /**
+     * The RCE-class tools. A one-word typo reclassifying any of these to API
+     * skips the local ACL preflight entirely, because authorise() returns true
+     * for API-kind tools before it ever loads the user.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function coreAdminTools(): array
+    {
+        return [
+            'install_extension' => ['install_extension'],
+            'uninstall_extension' => ['uninstall_extension'],
+            'update_template_file' => ['update_template_file'],
+            'create_template_override' => ['create_template_override'],
+            'list_template_files' => ['list_template_files'],
+            'get_template_file' => ['get_template_file'],
+        ];
+    }
+
+    /**
+     * @dataProvider coreAdminTools
+     */
+    public function testHighPrivilegeToolIsDeniedWithoutCoreAdmin(string $tool): void
+    {
+        $user = $this->user(true, [['core.manage', 'com_cache']]);
+        $authorizer = new GovernedToolAuthorizer(new ToolAccessPolicy(), static fn (): object => $user);
+
+        $this->assertFalse($authorizer->authorise(
+            new AuthenticatedPrincipal(1, 'selector', 7, 'Client', 'token'),
+            $tool,
+            []
+        ), $tool . ' must require core.admin');
+    }
+
+    /**
+     * @dataProvider coreAdminTools
+     */
+    public function testHighPrivilegeToolIsAllowedWithCoreAdmin(string $tool): void
+    {
+        $user = $this->user(true, [['core.admin', null]]);
+        $authorizer = new GovernedToolAuthorizer(new ToolAccessPolicy(), static fn (): object => $user);
+
+        $this->assertTrue($authorizer->authorise(
+            new AuthenticatedPrincipal(1, 'selector', 7, 'Client', 'token'),
+            $tool,
+            []
+        ), $tool . ' must be allowed for core.admin');
+    }
+
+    /**
+     * @dataProvider coreAdminTools
+     */
+    public function testHighPrivilegeToolIsClassifiedDirectAndRequiresCoreAdmin(string $tool): void
+    {
+        // Pins the classification itself, so reclassifying one of these to API
+        // is a test failure rather than a silent ACL bypass.
+        $policy = (new ToolAccessPolicy())->forTool($tool);
+
+        $this->assertNotNull($policy);
+        $this->assertSame(ToolAccessPolicy::DIRECT, $policy['kind'], $tool . ' must stay DIRECT');
+        $this->assertSame('core.admin', $policy['action'], $tool . ' must stay core.admin');
+    }
+
+    public function testArticleDirectOperationDeniesEditOwnForANonOwner(): void
+    {
+        // core.edit.own must only apply to the principal's own content. Without
+        // this, any holder of core.edit.own reaches every article on the site.
+        $user = $this->user(true, [['core.edit.own', 'com_content.article.19']]);
+        $authorizer = new GovernedToolAuthorizer(
+            new ToolAccessPolicy(),
+            static fn (): object => $user,
+            static fn (string $kind, int $id): ?array => $kind === 'article'
+                ? ['id' => $id, 'created_by' => 999]
+                : null
+        );
+
+        $this->assertFalse($authorizer->authorise(
+            new AuthenticatedPrincipal(1, 'selector', 7, 'Client', 'token'),
+            'get_article_by_id',
+            ['id' => 19]
+        ));
     }
 }

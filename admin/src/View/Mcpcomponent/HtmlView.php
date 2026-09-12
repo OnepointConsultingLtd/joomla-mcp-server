@@ -13,6 +13,7 @@ namespace Joomla\Component\Mcpserver\Administrator\View\Mcpcomponent;
 defined('_JEXEC') or die;
 
 use Joomla\CMS\Component\ComponentHelper;
+use Joomla\CMS\Language\Text;
 use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 use Joomla\CMS\Toolbar\ToolbarHelper;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
@@ -39,7 +40,7 @@ class HtmlView extends BaseHtmlView
      */
     public function display($tpl = null)
     {
-        ToolbarHelper::title('MCP Server', 'mcp');
+        ToolbarHelper::title(Text::_('COM_MCPSERVER_CLIENT_CONFIG_TITLE'), 'mcp');
         ToolbarHelper::preferences('com_mcpserver');
         
         $params = ComponentHelper::getParams('com_mcpserver');

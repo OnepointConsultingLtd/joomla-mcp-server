@@ -50,7 +50,9 @@ trait RpcHandlerTrait
 {
     public function sse(): void
     {
+        $startTime = microtime(true);
         $app = Factory::getApplication();
+        $context = $app->getName() === 'administrator' ? 'admin' : 'site';
         $params = ComponentHelper::getParams('com_mcpserver');
 
         $this->handleCors($params);
@@ -67,6 +69,11 @@ trait RpcHandlerTrait
             header('Retry-After: ' . $rateLimit['retry_after']);
             http_response_code(429);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::RATE_LIMITED, 'Rate limit exceeded'));
+            // Audited like handle()'s equivalent path: a credential-guessing
+            // campaign against rpc.sse must not be invisible in the trail.
+            $this->recordGovernanceAudit(
+                $startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null
+            );
             $app->close();
             return;
         }
@@ -79,6 +86,19 @@ trait RpcHandlerTrait
             header('Content-Type: application/json; charset=utf-8');
             http_response_code($authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
+            $this->recordGovernanceAudit(
+                $startTime,
+                '',
+                '',
+                'auth_failed',
+                $authError['code'],
+                $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403,
+                $clientIp,
+                $context,
+                null,
+                null,
+                null
+            );
             $app->close();
             return;
         }
@@ -187,7 +207,6 @@ trait RpcHandlerTrait
             header('Retry-After: ' . $rateLimit['retry_after']);
             http_response_code(429);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::RATE_LIMITED, 'Rate limit exceeded'));
-            $this->recordMetric($startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context);
             $this->recordGovernanceAudit($startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null);
             $app->close();
             return;
@@ -203,7 +222,6 @@ trait RpcHandlerTrait
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
             http_response_code($code);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
-            $this->recordMetric($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context);
             $this->recordGovernanceAudit($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context, null, null, null);
             $app->close();
             return;
@@ -229,7 +247,6 @@ trait RpcHandlerTrait
         if ($request === null) {
             http_response_code(400);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::INVALID_REQUEST, 'Invalid JSON-RPC 2.0 request'));
-            $this->recordMetric($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 400, $clientIp, $context);
             $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 400, $clientIp, $context, $principal, null, null);
             $app->close();
             return;
@@ -240,14 +257,18 @@ trait RpcHandlerTrait
 
         $response = $rpcService->handle($request);
 
-        // Policy denials (disabled tool, read-only mode) are MCP tool results
-        // with isError=true, not JSON-RPC errors, so they are invisible in the
-        // response envelope — ask the service so they are not logged as 'ok'.
-        $okStatus = $rpcService->wasLastCallBlocked() ? 'blocked' : 'ok';
+        // Policy denials (disabled tool, read-only mode) and tool execution
+        // failures are MCP tool results with isError=true, not JSON-RPC errors,
+        // so both are invisible in the response envelope — ask the service so
+        // neither is logged as 'ok'.
+        $okStatus = match (true) {
+            $rpcService->wasLastCallBlocked() => 'blocked',
+            $rpcService->wasLastCallFailed() => 'error',
+            default => 'ok',
+        };
 
         if ($response === null) {
             http_response_code(204);
-            $this->recordMetric($startTime, $method, $toolName, $okStatus, null, 204, $clientIp, $context);
             $this->recordGovernanceAudit(
                 $startTime,
                 $method,
@@ -273,17 +294,6 @@ trait RpcHandlerTrait
                 default => 200,
             };
         }
-
-        $this->recordMetric(
-            $startTime,
-            $method,
-            $toolName,
-            isset($response['error']) ? 'error' : $okStatus,
-            $response['error']['code'] ?? null,
-            $httpStatus,
-            $clientIp,
-            $context
-        );
 
         $this->recordGovernanceAudit(
             $startTime,
@@ -340,29 +350,22 @@ trait RpcHandlerTrait
 
             if ($request === null) {
                 $responses[] = JsonRpc::errorResponse(null, JsonRpc::INVALID_REQUEST, 'Invalid JSON-RPC 2.0 request');
-                $this->recordMetric($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 200, $clientIp, $context);
                 $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 200, $clientIp, $context, $principal, null, null);
                 continue;
             }
 
             $response = $rpcService->handle($request);
 
-            // See handle(): policy denials are tool results, not JSON-RPC errors.
-            $okStatus = $rpcService->wasLastCallBlocked() ? 'blocked' : 'ok';
+            // See handle(): policy denials and tool failures are tool results,
+            // not JSON-RPC errors.
+            $okStatus = match (true) {
+                $rpcService->wasLastCallBlocked() => 'blocked',
+                $rpcService->wasLastCallFailed() => 'error',
+                default => 'ok',
+            };
             $entryMethod = (string) ($request['method'] ?? '');
             $entryToolName = $this->extractToolName($request);
             $entryStatus = isset($response['error']) ? 'error' : $okStatus;
-
-            $this->recordMetric(
-                $startTime,
-                $entryMethod,
-                $entryToolName,
-                $entryStatus,
-                $response['error']['code'] ?? null,
-                200,
-                $clientIp,
-                $context
-            );
 
             $this->recordGovernanceAudit(
                 $startTime,
@@ -544,13 +547,21 @@ trait RpcHandlerTrait
     }
 
     /**
-     * Record one governed-request audit row and, for a successful mutating
-     * tool call made by an authenticated principal, a Joomla Action Log
-     * entry. Both are resilient: neither the audit write nor the action log
-     * write is allowed to alter or delay the RPC response already sent, and
-     * a legacy null principal is still audited (with null attribution) but
-     * never emits an Action Log entry (there is no Joomla user to attribute
-     * it to).
+     * Record exactly one request-log row and, for a successful mutating tool
+     * call made by an authenticated principal, a Joomla Action Log entry.
+     *
+     * This is the only request-log writer on the RPC path. GovernanceAuditService
+     * writes a superset of MetricsService's columns, so recordMetric() is used
+     * solely as a fallback for contexts where the DI container is unavailable
+     * and the audit service cannot be resolved — never in addition to it.
+     *
+     * Neither write may fail the RPC call it reports on, but a failed audit
+     * write is logged at critical: silently losing the row would destroy the
+     * accountability guarantee that is this feature's entire purpose. Note both
+     * run before the success response is echoed, so they add latency to the
+     * request. A legacy null principal is still audited (with null attribution)
+     * but never emits an Action Log entry — there is no Joomla user to
+     * attribute it to.
      */
     private function recordGovernanceAudit(
         float $startTime,
@@ -567,7 +578,11 @@ trait RpcHandlerTrait
     ): void {
         $audit = $this->resolveService(GovernanceAuditService::class);
 
-        if ($audit !== null) {
+        if ($audit === null) {
+            // No container: fall back to the base-column writer so the request
+            // is still logged, just without attribution.
+            $this->recordMetric($startTime, $method, $toolName, $status, $errorCode, $httpStatus, $clientIp, $context);
+        } else {
             try {
                 $audit->record(
                     method: $method,
@@ -582,8 +597,22 @@ trait RpcHandlerTrait
                     requestId: $requestId,
                     target: $target,
                 );
-            } catch (\Throwable) {
-                // The audit trail must never disrupt the RPC response already sent.
+            } catch (\Throwable $e) {
+                // Must not disrupt the RPC response, but must not vanish either:
+                // a persistent failure here (e.g. the 1.8.0 attribution columns
+                // never applied) would otherwise leave the audit trail silently
+                // empty while the server looks perfectly healthy.
+                $this->resolveService(LoggerInterface::class)?->critical(
+                    'Governed audit write failed — this request is NOT in the audit trail',
+                    [
+                        'error'      => $e->getMessage(),
+                        'method'     => $method,
+                        'tool'       => $toolName,
+                        'user_id'    => $principal?->userId,
+                        'selector'   => $principal?->selector,
+                        'request_id' => $requestId,
+                    ]
+                );
             }
         }
 

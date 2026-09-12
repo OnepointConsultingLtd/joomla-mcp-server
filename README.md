@@ -6,7 +6,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## Features
 
-- Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log
+- Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log — restricted to the viewer's own requests unless they are a Super User
 - One-click Claude Desktop extension (`.mcpb`), generated on demand from the administrator or attached to every release
 - Security with bearer token authentication, optional IP allow-listing and CORS origin control
 - Configurable fixed-window rate limiting
@@ -222,7 +222,7 @@ The build creates `com_mcpserver-<version>.zip` at the repository root. The vers
 
 ## Configuration
 
-Open **Administrator → Components → MCP Server → Options**.
+Open **Administrator → Components → MCP Server**, then click **Options** in the toolbar.
 
 Key settings:
 
@@ -253,7 +253,7 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
    - Go to **Users → Manage**, edit the chosen user, and open the **Joomla API Token** tab.
    - Set **Token Enabled** to *Yes*, click **Save**, then copy the generated token. (If the tab is missing, enable the **User - Joomla API Token** plugin under **System → Plugins**.)
 
-3. **Paste the token into the component options.** Back in **Components → MCP Server → Options**, paste the value into **API Token** and click **Save**.
+3. **Paste the token into the component options.** Back in **Components → MCP Server**, click **Options** in the toolbar, paste the value into **API Token** and click **Save**.
 
 4. **Verify the API is reachable.** The component calls your site's own API under `/api/`, so the web server must route that path to Joomla's API application. On Apache this works out of the box — Joomla's core `.htaccess` rewrites `/api/` requests to `api/index.php`. On nginx there is no equivalent by default, so every tool fails while `health.ping` still reports `ok` (that endpoint only checks the component itself, not the outbound API layer). Check with:
 
@@ -284,25 +284,47 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
 
 By default the component authenticates every MCP client with the single shared **MCP Bearer Token** and makes outbound Joomla API calls with the **Legacy Shared API Token** in Basic Settings. **Governed Mode** ignores that Basic Settings token and replaces it with individually issued, revocable credentials: each MCP client authenticates with its own bearer token, and every request is made using the Joomla API token encrypted inside that client's credential. Successful mutating tool calls made under a governed credential are additionally attributed to the credential's Joomla user in both the component's own request log and, when available, Joomla's core **Action Logs**.
 
+### Prerequisite: API tokens for every user who needs a credential
+
+Claiming a governed credential requires the user's **own** Joomla Web Services API token, so each of them must be able to create one. Joomla's **User - Joomla API Token** plugin controls this, and its *Allowed User Groups* setting defaults to **Super Users only** — so on a stock site nobody else has an **API Tokens** tab on their account, the claim field cannot be filled in, and the claim fails.
+
+Before cutover, for every group that will hold a credential:
+
+1. Go to **System → Plugins → User - Joomla API Token** and make sure it is enabled.
+2. Add those user groups to **Allowed User Groups**, and save.
+3. Each user opens their account (**User Menu → Edit Account**, or **Users → Manage → [their account]**), goes to the **API Tokens** tab, sets **Token Enabled** to *Yes*, and copies the token shown.
+
+That token is what they paste when claiming. The component verifies it belongs to them, stores it encrypted, and never displays it again.
+
+You do not have to work this out in advance: if a requester's group has no route to an API token, the **Pending credential requests** queue says so on that request, names the groups to add, and distinguishes a group restriction from the plugin being disabled outright. A request flagged this way can be approved, but never claimed, until the plugin setting is changed.
+
 ### Prerequisite: Joomla Action Logs
 
 Governed Mode attributes successful mutating tool calls (create/update/delete-type calls, not read-only ones) to the issuing user in Joomla's core **System - Action Logs** plugin, in addition to the component's own audit trail. Before cutover, enable it under **System → Plugins → System - Action Logs**. If the plugin (or `com_actionlogs` itself) is not installed or enabled, the Action Log write is silently skipped — the MCP response and the component's own audit trail (`#__mcpserver_request_log`) are unaffected — so governed mode still functions, but per-user actions will not appear in **Users → Action Logs**. Enable it first if you need that attribution for compliance or review.
 
 ### Setup
 
-1. Go to **Administrator → Components → MCP Server → My Credentials**. This requires `core.admin` on `com_mcpserver` (a Super User, or an account granted equivalent permission).
-2. Click **Provision credential salt**. This generates a random credential salt (stored in the component's own configuration, not in `mcpserver.xml` or any file) if one does not already exist. The credential salt, combined with the Joomla application secret, derives the key that encrypts every stored credential's underlying Joomla API token — back it up as part of your normal Joomla database backups; see Recovery below.
-3. The resulting **recovery key fingerprint** (a one-way hash, never the salt or secret itself) is shown on the same page. Record it: after a database restore or migration, compare it against the fingerprint shown post-restore to confirm the credential salt was preserved intact, before assuming existing credentials will still decrypt.
+> Setup requires **Governed Mode to be enabled first** — see *Migrating clients off the shared token* below, and note the downtime warning there. While Governed Mode is off, **Manage Credentials** is hidden and every task on it is refused.
+
+The credential salt — a random value stored in the component's own configuration, not in `mcpserver.xml` or any file — is **generated automatically when the component is installed or updated**, so there is nothing to provision by hand. Combined with the Joomla application secret, it derives the key that encrypts every stored credential's underlying Joomla API token, so back it up as part of your normal Joomla database backups; see Recovery below.
+
+1. Go to **Administrator → Components → MCP Server → Client Configuration** and click **Manage Credentials** in the Governed Mode panel. (There is no menu entry for it: the panel, and therefore the page, only appear while Governed Mode is on.) Any user granted **Manage Own Credentials** (`mcpserver.credential.self`) or `core.manage` on `com_mcpserver` can open this page — that is what the request step below relies on. Approving, rejecting, deleting a credential and pruning the audit trail each additionally require a Super User (global `core.admin`).
+2. Confirm the **Governed Mode Setup** panel reports the salt as provisioned, and record the **recovery key fingerprint** (a one-way hash, never the salt or secret itself) shown beside it. After a database restore or migration, compare it against the fingerprint shown post-restore to confirm the credential salt was preserved intact, before assuming existing credentials will still decrypt.
+3. If the panel instead shows a **Provision credential salt** button, automatic provisioning did not run (or the stored salt is unreadable). Pressing it — a Super User action — generates a salt only while no credential exists. If credentials are already stored, do **not** treat this as a fix: their salt has been lost, a new one cannot decrypt them, and the button will refuse. Restore the salt from backup instead, or reissue every credential.
 
 ### Migrating clients off the shared token
 
-Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Security Settings**), not a per-client switch, so plan the cutover as: approve and claim credentials first, then flip the toggle.
+Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Security Settings**), not a per-client switch, and it is the master switch for the whole credential workflow: while it is off, **Manage Credentials** is hidden from the administrator menu and no credential can be requested, approved or claimed.
 
-1. With Governed Mode still **disabled** (clients keep working on the shared `MCP Bearer Token`), complete Setup above so the credential salt exists.
-2. Each eligible user opens **My Credentials** and requests access with the client name. A different Super User reviews the pending request, approves it, and chooses that request's expiry. A Super User cannot approve or reject their own request.
-3. The request owner then opens their approved request, enters their own current Joomla API token, and claims the credential. The component validates the token's ownership only at this step. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
-4. Once every client that must keep working has its own credential claimed and configured, enable **Governed Mode** in **Options → Security Settings**.
-5. From this point, the shared `API Token` and `MCP Bearer Token` settings are no longer consulted for MCP requests; each client authenticates and acts as its own issued credential and its own Joomla user.
+> **Plan for downtime.** Enabling Governed Mode stops the shared `MCP Bearer Token` from being accepted immediately, but credentials can only be requested after it is enabled. Every MCP client is therefore refused from the moment you switch it on until its user has claimed a credential. Do the cutover in a maintenance window, and have each user ready to claim.
+
+1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the shared `API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
+2. Open **Manage Credentials** and check the Setup panel above: the credential salt is generated automatically on install/update, so this is normally a confirmation rather than an action.
+3. Each eligible user opens **Manage Credentials** and requests access with the client name. A different Super User reviews the pending request, approves it, and chooses that request's expiry. A Super User cannot approve or reject their own request.
+4. The request owner then opens their approved request, enters their own current Joomla API token, and claims the credential. The component validates the token's ownership only at this step. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
+5. Once every client has claimed and configured its credential, service is restored: each client now authenticates and acts as its own issued credential and its own Joomla user.
+
+To roll back, switch Governed Mode off: the shared bearer token is accepted again immediately, issued credentials stop working, and **Manage Credentials** disappears from the menu. Nothing is deleted, so switching it back on restores the previously issued credentials.
 
 ### Rollback
 
@@ -310,8 +332,8 @@ Disabling **Governed Mode** in **Options → Security Settings** is the rollback
 
 ### Recovery
 
-- **Lost or revoked a credential:** submit and claim a new request from **My Credentials** for the same user; the old credential's bearer token cannot be recovered (it is never stored), only revoked.
-- **Restoring the site from a database backup:** because encrypted credential tokens are keyed on the credential salt (`#__extensions.params.credential_salt` for `com_mcpserver`) together with the Joomla application secret, restore both from the same backup as the `#__mcpserver_credential` table. Compare the recovery key fingerprint shown on **My Credentials** before and after the restore to confirm the salt was preserved; a changed fingerprint means every existing credential must be reissued.
+- **Lost or revoked a credential:** submit and claim a new request from **Manage Credentials** for the same user; the old credential's bearer token cannot be recovered (it is never stored), only revoked.
+- **Restoring the site from a database backup:** because encrypted credential tokens are keyed on the credential salt (`#__extensions.params.credential_salt` for `com_mcpserver`) together with the Joomla application secret, restore both from the same backup as the `#__mcpserver_credential` table. Compare the recovery key fingerprint shown on **Manage Credentials** before and after the restore to confirm the salt was preserved; a changed fingerprint means every existing credential must be reissued.
 - **Joomla application secret rotated independently of a restore:** this also invalidates every existing credential's stored ciphertext, since the encryption key is derived from both the secret and the salt. Reissue credentials for every affected client after rotating the secret.
 
 ## Endpoints
@@ -336,7 +358,7 @@ To install:
 
 1. Double-click the downloaded `.mcpb` file (requires Claude Desktop).
 2. Enter the **MCP endpoint URL** — pre-filled when the bundle was downloaded from your site; otherwise copy the *RPC Endpoint* shown under **Components → MCP Server**.
-3. Enter the **MCP Bearer Token** from **Components → MCP Server → Options**.
+3. Enter the **MCP Bearer Token** from **Components → MCP Server**, under **Options** in the toolbar.
 
 The bearer token is never embedded in the downloaded file: it remains a one-time paste into Claude Desktop's settings, so no live credential lands in your downloads folder, backups or sync folders.
 

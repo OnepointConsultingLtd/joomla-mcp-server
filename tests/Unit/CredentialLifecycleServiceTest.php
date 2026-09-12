@@ -48,6 +48,9 @@ final class InMemoryCredentialLifecycleStore implements CredentialLifecycleStore
                 'id' => (string) $id,
                 'owner_id' => $record['owner_id'],
                 'owner_name' => $record['owner_name'],
+                // Always blank here: the client name is joined from the request
+                // table, which this in-memory store does not model.
+                'client_name' => '',
                 'selector' => $record['selector'],
                 'expires_at' => $record['expires_at'],
                 'created_at' => $record['created_at'],
@@ -65,6 +68,9 @@ final class InMemoryCredentialLifecycleStore implements CredentialLifecycleStore
                 'id' => (string) $id,
                 'owner_id' => $record['owner_id'],
                 'owner_name' => $record['owner_name'],
+                // Always blank here: the client name is joined from the request
+                // table, which this in-memory store does not model.
+                'client_name' => '',
                 'selector' => $record['selector'],
                 'expires_at' => $record['expires_at'],
                 'created_at' => $record['created_at'],

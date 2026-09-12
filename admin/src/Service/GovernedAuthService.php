@@ -13,6 +13,7 @@ namespace Joomla\Component\Mcpserver\Administrator\Service;
 defined('_JEXEC') or die;
 
 use DateTimeImmutable;
+use DateTimeZone;
 
 /**
  * Authenticates governed-mode MCP requests using stored credentials instead
@@ -44,7 +45,9 @@ final class GovernedAuthService
         }
 
         try {
-            return $this->authenticator->authenticateBearer($header, new DateTimeImmutable());
+            // UTC explicitly: credential expiries are stored in UTC, so an ambient
+            // date.timezone would shift every expiry check by the offset.
+            return $this->authenticator->authenticateBearer($header, new DateTimeImmutable('now', new DateTimeZone('UTC')));
         } catch (\RuntimeException) {
             return ['error' => 'Invalid or expired MCP credential', 'code' => JsonRpc::UNAUTHORIZED];
         }

@@ -33,6 +33,7 @@ final class FakeAuditQueryQuery implements QueryInterface
     public array $insertColumns = [];
     public string $insertValues = '';
     public string $orderClause = '';
+    public string $groupClause = '';
     /** @var list<array{type:string,table:string,condition:string}> */
     public array $joins = [];
 
@@ -106,11 +107,19 @@ final class FakeAuditQueryQuery implements QueryInterface
         return $this;
     }
 
+    public function group(array|string $columns): self
+    {
+        $this->groupClause = is_array($columns) ? implode(',', $columns) : $columns;
+
+        return $this;
+    }
+
     public function __toString(): string
     {
         return 'SELECT ' . implode(',', $this->selectColumns)
             . ' FROM ' . (string) $this->fromTable
             . (($this->whereConditions !== []) ? ' WHERE ' . implode(' AND ', $this->whereConditions) : '')
+            . (($this->groupClause !== '') ? ' GROUP BY ' . $this->groupClause : '')
             . (($this->orderClause !== '') ? ' ORDER BY ' . $this->orderClause : '');
     }
 }
@@ -324,6 +333,143 @@ final class GovernanceAuditQueryServiceTest extends TestCase
         $service->search([], -5);
 
         $this->assertGreaterThanOrEqual(1, $db->lastLimit);
+    }
+
+    public function testWithUserScopeRestrictsSearchToThatUser(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = (new GovernanceAuditQueryService($db))->withUserScope(7);
+
+        $service->search();
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertStringContainsString('`audit.user_id` = 7', (string) $db->lastQuery);
+    }
+
+    /**
+     * The scope is an authorisation boundary: a restricted viewer who submits
+     * someone else's id must end up with the intersection (no rows), never
+     * with that other user's rows.
+     */
+    public function testUserScopeCannotBeWidenedByASuppliedUserIdFilter(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = (new GovernanceAuditQueryService($db))->withUserScope(7);
+
+        $service->search(['userId' => 42]);
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertContains('`audit.user_id` = 7', $db->lastQuery->whereConditions);
+        $this->assertContains('`audit.user_id` = 42', $db->lastQuery->whereConditions);
+        $this->assertStringContainsString(
+            '`audit.user_id` = 7 AND `audit.user_id` = 42',
+            (string) $db->lastQuery,
+            'Both conditions must be ANDed so the filter can only narrow the scope.'
+        );
+    }
+
+    public function testExplicitNullScopeSearchesTheWholeAuditTrail(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = (new GovernanceAuditQueryService($db))->withUserScope(null);
+
+        $service->search();
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertSame([], $db->lastQuery->whereConditions);
+    }
+
+    /**
+     * The DI container shares one query service, so scoping it for one viewer
+     * must not leak into the next request that resolves it.
+     */
+    public function testWithUserScopeLeavesTheOriginalServiceUnscoped(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = new GovernanceAuditQueryService($db);
+
+        $service->withUserScope(7);
+        $service->search();
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertSame([], $db->lastQuery->whereConditions);
+    }
+
+    public function testGetAttributedUsersDrawsTheListFromTheLogNotTheUsersTable(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = new GovernanceAuditQueryService($db);
+
+        $service->getAttributedUsers();
+
+        $this->assertNotNull($db->lastQuery);
+        // Driven from the log so every option returns rows; listing every
+        // Joomla account would mostly offer choices that match nothing.
+        $this->assertSame('`#__mcpserver_request_log` AS `audit`', $db->lastQuery->fromTable);
+        $this->assertSame('`#__users` AS `users`', $db->lastQuery->joins[0]['table']);
+        $this->assertStringContainsString('`audit.user_id`', $db->lastQuery->groupClause);
+    }
+
+    /**
+     * Rows with no user_id belong to no account (legacy shared-token mode, or
+     * a failure before a principal was resolved). They are reached by not
+     * filtering, so they must not produce a phantom option.
+     */
+    public function testGetAttributedUsersExcludesUnattributedRows(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = new GovernanceAuditQueryService($db);
+
+        $service->getAttributedUsers();
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertContains('`audit.user_id` IS NOT NULL', $db->lastQuery->whereConditions);
+    }
+
+    public function testGetAttributedUsersReturnsIdAndNamePairs(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $db->rows = [
+            ['user_id' => '42', 'user_name' => 'Alice'],
+            ['user_id' => '7', 'user_name' => null],
+        ];
+        $service = new GovernanceAuditQueryService($db);
+
+        $this->assertSame(
+            [
+                ['user_id' => 42, 'user_name' => 'Alice'],
+                // Deleted from #__users: the caller falls back to the id so the
+                // row stays attributable rather than becoming anonymous.
+                ['user_id' => 7, 'user_name' => null],
+            ],
+            $service->getAttributedUsers()
+        );
+    }
+
+    public function testGetAttributedUsersIsClampedToAMaximum(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = new GovernanceAuditQueryService($db);
+
+        $service->getAttributedUsers(100000);
+
+        $this->assertLessThanOrEqual(500, $db->lastLimit);
+        $this->assertGreaterThanOrEqual(1, $db->lastLimit);
+    }
+
+    /**
+     * Only an unrestricted viewer is offered this filter, but a scoped one
+     * must never be able to enumerate who else has used the server.
+     */
+    public function testGetAttributedUsersHonoursTheUserScope(): void
+    {
+        $db = new FakeAuditQueryDatabase();
+        $service = (new GovernanceAuditQueryService($db))->withUserScope(7);
+
+        $service->getAttributedUsers();
+
+        $this->assertNotNull($db->lastQuery);
+        $this->assertContains('`audit.user_id` = 7', $db->lastQuery->whereConditions);
     }
 
     public function testSearchReturnsRowsFromDatabase(): void

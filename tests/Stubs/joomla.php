@@ -32,10 +32,49 @@ namespace Joomla\CMS {
             return self::$dbo;
         }
 
+        public static function getDate(string $time = 'now'): \Joomla\CMS\Date\Date
+        {
+            return new \Joomla\CMS\Date\Date($time);
+        }
+
         public static function reset(): void
         {
             self::$application = null;
             self::$dbo = null;
+        }
+    }
+}
+
+namespace Joomla\CMS\Date {
+    /**
+     * Minimal stand-in for Joomla's Date. The real class extends \DateTime,
+     * so modify() mutates and returns $this; mirrored here so tests exercise
+     * the same aliasing behaviour as production.
+     */
+    class Date
+    {
+        private \DateTime $date;
+
+        public function __construct(string $time = 'now')
+        {
+            $this->date = new \DateTime($time, new \DateTimeZone('UTC'));
+        }
+
+        public function modify(string $modifier): self
+        {
+            $this->date->modify($modifier);
+
+            return $this;
+        }
+
+        public function format(string $format): string
+        {
+            return $this->date->format($format);
+        }
+
+        public function toSql(): string
+        {
+            return $this->date->format('Y-m-d H:i:s');
         }
     }
 }
@@ -236,16 +275,50 @@ namespace Joomla\CMS\Uri {
 namespace Joomla\Registry {
     class Registry
     {
+        /** @var array<string, mixed> */
+        private array $data;
+
         /**
-         * @param  array<string, mixed>  $data
+         * Mirrors the real Registry closely enough for the component's own use:
+         * a JSON string (how #__extensions.params is stored) or an array.
+         *
+         * @param  array<string, mixed>|string  $data
          */
-        public function __construct(private array $data = [])
+        public function __construct(array|string $data = [])
         {
+            if (\is_string($data)) {
+                $decoded = $data === '' ? [] : json_decode($data, true);
+                $this->data = \is_array($decoded) ? $decoded : [];
+
+                return;
+            }
+
+            $this->data = $data;
         }
 
         public function get(string $path, mixed $default = null): mixed
         {
             return $this->data[$path] ?? $default;
+        }
+
+        public function set(string $path, mixed $value): mixed
+        {
+            $this->data[$path] = $value;
+
+            return $value;
+        }
+
+        /**
+         * @return array<string, mixed>
+         */
+        public function toArray(): array
+        {
+            return $this->data;
+        }
+
+        public function __toString(): string
+        {
+            return (string) json_encode($this->data);
         }
     }
 }
@@ -312,6 +385,54 @@ namespace Joomla\CMS\Extension {
     if (!class_exists(MVCComponent::class)) {
         class MVCComponent
         {
+        }
+    }
+}
+
+namespace Joomla\CMS\Installer {
+    if (!class_exists(InstallerAdapter::class)) {
+        class InstallerAdapter
+        {
+        }
+    }
+}
+
+namespace Joomla\CMS\Language {
+    if (!class_exists(Text::class)) {
+        class Text
+        {
+            public static function _(string $string): string
+            {
+                return $string;
+            }
+
+            public static function sprintf(string $string, mixed ...$args): string
+            {
+                return $string . ': ' . implode(', ', array_map('strval', $args));
+            }
+        }
+    }
+}
+
+namespace {
+    if (!class_exists('JLoader')) {
+        class JLoader
+        {
+            /** @var list<array{0:string,1:string}> */
+            public static array $registeredNamespaces = [];
+
+            public static function registerNamespace(
+                string $namespace,
+                string $path,
+                bool $reset = false,
+                bool $prepend = false,
+                string $type = 'psr4'
+            ): void {
+                // The component's classes are already on the test autoloader;
+                // recording the call is enough to assert the installer binds the
+                // namespace rather than relying on the compiled namespace map.
+                self::$registeredNamespaces[] = [$namespace, $path];
+            }
         }
     }
 }

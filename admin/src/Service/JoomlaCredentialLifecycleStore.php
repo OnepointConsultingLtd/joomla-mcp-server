@@ -26,6 +26,7 @@ use Joomla\Database\DatabaseInterface;
 final class JoomlaCredentialLifecycleStore implements CredentialLifecycleStoreInterface
 {
     private const TABLE = '#__mcpserver_credential';
+    private const REQUEST_TABLE = '#__mcpserver_credential_request';
     private const STATUS_ACTIVE = 'active';
     private const STATUS_REVOKED = 'revoked';
 
@@ -74,7 +75,7 @@ final class JoomlaCredentialLifecycleStore implements CredentialLifecycleStoreIn
 
     public function listByOwner(int $ownerId): array
     {
-        return $this->listMetadata($this->db->quoteName('user_id') . ' = ' . (int) $ownerId);
+        return $this->listMetadata($this->db->quoteName('c.user_id') . ' = ' . (int) $ownerId);
     }
 
     public function listAllMetadata(): array
@@ -82,13 +83,30 @@ final class JoomlaCredentialLifecycleStore implements CredentialLifecycleStoreIn
         return $this->listMetadata();
     }
 
-    /** @return list<array{id:string,owner_id:int,owner_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}> */
+    /**
+     * @return list<array{id:string,owner_id:int,owner_name:string,client_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
+     *
+     * The client name lives on the request the credential was claimed from,
+     * never copied onto the credential: it is the requester's own description
+     * of where the credential will be used, and a copy would drift from it.
+     *
+     * LEFT JOIN, not INNER: the credential is the authoritative record. One
+     * that has no request row — issued by rotation, or whose request was
+     * pruned — must still list (and stay revocable) rather than disappear,
+     * so callers treat a blank client name as "not recorded".
+     */
     private function listMetadata(?string $condition = null): array
     {
         $db = $this->db;
         $query = $db->getQuery(true)
-            ->select($db->quoteName(['id', 'user_id', 'name', 'selector', 'expires', 'created', 'status']))
-            ->from($db->quoteName(self::TABLE));
+            ->select($db->quoteName(['c.id', 'c.user_id', 'c.name', 'c.selector', 'c.expires', 'c.created', 'c.status']))
+            ->select($db->quoteName('r.client_name', 'client_name'))
+            ->from($db->quoteName(self::TABLE, 'c'))
+            ->join(
+                'LEFT',
+                $db->quoteName(self::REQUEST_TABLE, 'r'),
+                $db->quoteName('r.credential_id') . ' = ' . $db->quoteName('c.id')
+            );
         if ($condition !== null) {
             $query->where($condition);
         }
@@ -100,6 +118,7 @@ final class JoomlaCredentialLifecycleStore implements CredentialLifecycleStoreIn
                 'id' => (string) $row['id'],
                 'owner_id' => (int) $row['user_id'],
                 'owner_name' => (string) $row['name'],
+                'client_name' => (string) ($row['client_name'] ?? ''),
                 'selector' => (string) $row['selector'],
                 'expires_at' => self::toUnixTimestamp($row['expires']),
                 'created_at' => self::toUnixTimestamp($row['created']),

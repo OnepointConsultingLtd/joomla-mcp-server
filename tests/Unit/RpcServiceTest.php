@@ -15,6 +15,7 @@ defined('_JEXEC') or die;
 use Joomla\CMS\Cache\Cache;
 use Joomla\CMS\Event\Cache\AfterPurgeEvent;
 use Joomla\CMS\Factory;
+use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
 use Joomla\Component\Mcpserver\Administrator\Service\PromptRegistry;
@@ -414,5 +415,55 @@ class RpcServiceTest extends TestCase
         $this->assertArrayHasKey('structuredContent', $response['result']);
 
         return $response['result']['structuredContent'];
+    }
+
+    public function testFailedToolCallIsReportedAsFailedNotOk(): void
+    {
+        // A tool that throws is returned as a JSON-RPC *success* envelope
+        // carrying an MCP isError result, so $response['error'] is unset. Without
+        // wasLastCallFailed() the caller audits the failure as 'ok' and writes a
+        // Joomla Action Log "success" entry for a mutation that never happened.
+        $rest = $this->createMock(RestClient::class);
+        $rest->method('get')->willThrowException(new \RuntimeException('upstream exploded'));
+
+        $service = $this->makeService(null, $rest);
+        $response = $this->callTool($service, 'search_articles', ['search' => 'hello']);
+
+        $this->assertArrayNotHasKey('error', $response, 'tool failures are tool results, not JSON-RPC errors');
+        $this->assertTrue($service->wasLastCallFailed(), 'the failure must be visible to the audit caller');
+        $this->assertFalse($service->wasLastCallBlocked(), 'a failure is not a policy block');
+    }
+
+    public function testSuccessfulToolCallIsNotMarkedFailed(): void
+    {
+        $service = $this->makeService();
+        $service->handle(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []]);
+
+        $this->assertFalse($service->wasLastCallFailed());
+    }
+
+    public function testGovernedPrincipalWithoutAuthorizerIsRejectedAtConstruction(): void
+    {
+        // The ACL gate is skipped entirely when no authorizer is wired, so this
+        // pairing must be impossible to construct rather than merely avoided.
+        $policy = $this->createMock(PolicyService::class);
+        $policy->method('isToolAllowed')->willReturn(true);
+        $policy->method('isReadOnly')->willReturn(false);
+
+        $this->expectException(\LogicException::class);
+
+        new RpcService(
+            $this->createRestMock(),
+            new CacheService(new SimpleArrayCache()),
+            $policy,
+            $this->createMock(LoggerInterface::class),
+            new ToolRegistry(),
+            new SchemaValidator(),
+            new PromptRegistry(),
+            'joomla-mcp-server',
+            100,
+            new AuthenticatedPrincipal(1, 'selector16charsx', 2, 'Ada', 'api-token'),
+            null
+        );
     }
 }

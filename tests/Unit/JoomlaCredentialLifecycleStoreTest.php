@@ -25,6 +25,8 @@ final class FakeLifecycleQuery implements QueryInterface
     public array $selectColumns = [];
     public array|string $fromTable = '';
     /** @var list<string> */
+    public array $joins = [];
+    /** @var list<string> */
     public array $whereConditions = [];
     public string $updateTable = '';
     /** @var list<string> */
@@ -37,7 +39,11 @@ final class FakeLifecycleQuery implements QueryInterface
 
     public function select(array|string $columns): self
     {
-        $this->selectColumns = is_array($columns) ? $columns : [$columns];
+        // Appends, as the real query builder does: the metadata listing selects
+        // the credential columns and the joined client name in two calls.
+        foreach ((array) $columns as $column) {
+            $this->selectColumns[] = $column;
+        }
 
         return $this;
     }
@@ -45,6 +51,13 @@ final class FakeLifecycleQuery implements QueryInterface
     public function from(array|string $tables): self
     {
         $this->fromTable = $tables;
+
+        return $this;
+    }
+
+    public function join(string $type, string $table, string $condition = ''): self
+    {
+        $this->joins[] = $type . ' ' . $table . ' ON ' . $condition;
 
         return $this;
     }
@@ -151,7 +164,7 @@ final class FakeLifecycleDatabase implements DatabaseInterface
             return array_map(static fn (string $n): string => '`' . $n . '`', $name);
         }
 
-        return '`' . $name . '`';
+        return $alias === null ? '`' . $name . '`' : '`' . $name . '` AS `' . $alias . '`';
     }
 
     public function quote(array|string $text, bool $escape = true): array|string
@@ -268,6 +281,7 @@ final class JoomlaCredentialLifecycleStoreTest extends TestCase
                 'id' => '3',
                 'user_id' => '42',
                 'name' => 'CI Bot',
+                'client_name' => 'Claude Desktop',
                 'selector' => 'sel-abc',
                 'expires' => '2026-09-01 12:00:00',
                 'created' => '2026-08-01 12:00:00',
@@ -277,6 +291,7 @@ final class JoomlaCredentialLifecycleStoreTest extends TestCase
                 'id' => '4',
                 'user_id' => '42',
                 'name' => 'Nightly',
+                'client_name' => null,
                 'selector' => 'sel-def',
                 'expires' => '2026-09-05 12:00:00',
                 'created' => '2026-08-05 12:00:00',
@@ -288,13 +303,23 @@ final class JoomlaCredentialLifecycleStoreTest extends TestCase
         $rows = $store->listByOwner(42);
 
         $this->assertNotNull($db->lastQuery);
-        $this->assertSame('`#__mcpserver_credential`', $db->lastQuery->fromTable);
-        $this->assertStringContainsString('`user_id` = 42', implode(' AND ', $db->lastQuery->whereConditions));
+        $this->assertSame('`#__mcpserver_credential` AS `c`', $db->lastQuery->fromTable);
+        $this->assertSame(
+            ['LEFT `#__mcpserver_credential_request` AS `r` ON `r.credential_id` = `c.id`'],
+            $db->lastQuery->joins
+        );
+        $this->assertStringContainsString('`c.user_id` = 42', implode(' AND ', $db->lastQuery->whereConditions));
         $this->assertNotContains('`verifier`', $db->lastQuery->selectColumns);
         $this->assertNotContains('`token_ciphertext`', $db->lastQuery->selectColumns);
 
         $this->assertCount(2, $rows);
-        $this->assertSame(['id', 'owner_id', 'owner_name', 'selector', 'expires_at', 'created_at', 'revoked'], array_keys($rows[0]));
+        $this->assertSame(
+            ['id', 'owner_id', 'owner_name', 'client_name', 'selector', 'expires_at', 'created_at', 'revoked'],
+            array_keys($rows[0])
+        );
+        $this->assertSame('Claude Desktop', $rows[0]['client_name']);
+        // A credential whose request row is gone still lists, with no client name.
+        $this->assertSame('', $rows[1]['client_name']);
         $this->assertFalse($rows[0]['revoked']);
         $this->assertTrue($rows[1]['revoked']);
         foreach ($rows as $row) {

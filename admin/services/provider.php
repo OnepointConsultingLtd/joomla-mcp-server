@@ -15,6 +15,7 @@ if (is_file($autoload)) {
     require_once $autoload;
 }
 
+use Joomla\CMS\Access\Access;
 use Joomla\CMS\Component\ComponentHelper;
 use Joomla\CMS\Dispatcher\ComponentDispatcherFactoryInterface;
 use Joomla\CMS\Dispatcher\DispatcherInterface;
@@ -28,6 +29,7 @@ use Joomla\CMS\Application\CMSApplicationInterface;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Component\Mcpserver\Administrator\Dispatcher\Dispatcher;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
+use Joomla\Component\Mcpserver\Administrator\Service\AuditToolFilterService;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialCipher;
@@ -44,6 +46,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialLifecycleStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialRequestStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialStore;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenOwnershipValidator;
 use Joomla\Component\Mcpserver\Administrator\Service\McpbService;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
@@ -118,6 +121,15 @@ return new class implements ServiceProviderInterface {
             );
         });
 
+        // Reports whether a requester can create a Joomla API token at all, so
+        // the approval queue can flag a request that could never be claimed.
+        $container->share(JoomlaApiTokenAvailability::class, function () {
+            return new JoomlaApiTokenAvailability(
+                Factory::getDbo(),
+                static fn (int $userId): array => Access::getGroupsByUser($userId, true)
+            );
+        });
+
         $container->share(CredentialRequestService::class, function (Container $container) {
             return new CredentialRequestService(
                 $container->get(JoomlaCredentialRequestStore::class),
@@ -131,7 +143,10 @@ return new class implements ServiceProviderInterface {
         $container->share(GovernedCredentialAuthenticator::class, function (Container $container) {
             return new GovernedCredentialAuthenticator(
                 $container->get(JoomlaCredentialStore::class),
-                $container->get(CredentialCipher::class)
+                $container->get(CredentialCipher::class),
+                // So a failed last_used stamp is visible rather than silent; it
+                // no longer denies the request, which would hide it entirely.
+                $container->get(LoggerInterface::class)
             );
         });
 
@@ -181,6 +196,15 @@ return new class implements ServiceProviderInterface {
             return new PolicyService(ComponentHelper::getParams('com_mcpserver'));
         });
 
+        // Tool/prompt choices for the dashboard's audit Tool Name filter
+        $container->share(AuditToolFilterService::class, function (Container $container) {
+            return new AuditToolFilterService(
+                $container->get(ToolRegistry::class),
+                $container->get(PromptRegistry::class),
+                $container->get(PolicyService::class)
+            );
+        });
+
         // Logger
         $container->share(LoggerInterface::class, function () {
             $params = ComponentHelper::getParams('com_mcpserver');
@@ -204,13 +228,16 @@ return new class implements ServiceProviderInterface {
             return new MetricsService(ComponentHelper::getParams('com_mcpserver'));
         });
 
-        // Governance audit service: persists one row per MCP request into
-        // #__mcpserver_request_log, attributed to the authenticated principal
-        // when one is available (null attribution in legacy shared-token mode).
+        // Governance audit service: the sole writer of #__mcpserver_request_log,
+        // persisting one row per MCP request, attributed to the authenticated
+        // principal when one is available (null attribution in legacy
+        // shared-token mode). Params are injected so it honours metrics_enabled
+        // and metrics_retention_days, which it inherited from MetricsService.
         $container->share(GovernanceAuditService::class, function () {
             return new GovernanceAuditService(
                 Factory::getDbo(),
-                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now')
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now', new \DateTimeZone('UTC')),
+                ComponentHelper::getParams('com_mcpserver')
             );
         });
 
@@ -225,7 +252,7 @@ return new class implements ServiceProviderInterface {
         $container->share(GovernanceAuditRetentionService::class, function () {
             return new GovernanceAuditRetentionService(
                 Factory::getDbo(),
-                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now')
+                static fn (): \DateTimeImmutable => new \DateTimeImmutable('now', new \DateTimeZone('UTC'))
             );
         });
 

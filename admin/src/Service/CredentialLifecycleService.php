@@ -67,14 +67,14 @@ final class CredentialLifecycleService
     }
 
     /**
-     * @return list<array{id:string,owner_id:int,owner_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
+     * @return list<array{id:string,owner_id:int,owner_name:string,client_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}>
      */
     public function listForOwner(int $ownerId): array
     {
         return $this->store->listByOwner($ownerId);
     }
 
-    /** @return list<array{id:string,owner_id:int,owner_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}> */
+    /** @return list<array{id:string,owner_id:int,owner_name:string,client_name:string,selector:string,expires_at:int,created_at:int,revoked:bool}> */
     public function listAllMetadata(bool $actingIsSuperUser): array
     {
         if (!$actingIsSuperUser) {

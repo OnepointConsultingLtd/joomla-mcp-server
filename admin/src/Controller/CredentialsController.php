@@ -39,10 +39,27 @@ class CredentialsController extends BaseController
 
     private const MIN_EXPIRES_DAYS = 1;
     private const MAX_EXPIRES_DAYS = 3650;
-    private const DEFAULT_EXPIRES_DAYS = 30;
+    private const DEFAULT_EXPIRES_DAYS = 365;
+
+    /**
+     * Fallback retention for prune(), matching the prune form's own value and
+     * the metrics_retention_days config default.
+     *
+     * Deliberately not DEFAULT_EXPIRES_DAYS: pruning deletes audit rows, and
+     * reusing the credential-expiry default meant a request without the field
+     * would have silently deleted everything older than that instead of the
+     * window the UI shows.
+     */
+    private const DEFAULT_PRUNE_RETENTION_DAYS = 360;
 
     public function display($cachable = false, $urlparams = array())
     {
+        // Reported separately from the ACL refusal: "you lack permission" and
+        // "the feature is switched off" send an operator to different places.
+        if (!$this->requireGovernedMode()) {
+            return false;
+        }
+
         if (!$this->isAuthorised()) {
             $this->setRedirect('index.php?option=com_mcpserver', Text::_('JERROR_ALERTNOAUTHOR'), 'error');
             return false;
@@ -85,13 +102,20 @@ class CredentialsController extends BaseController
         }
 
         $user = $this->app->getIdentity();
+
+        // A null expiry means "never expires". It has to be an explicit choice
+        // by the approver, so the checkbox is the only way to reach it — an
+        // empty or zero day count still falls back to the default window
+        // rather than silently granting a permanent credential.
+        $neverExpires = (bool) $this->input->post->getInt('never_expires', 0);
         $days = max(self::MIN_EXPIRES_DAYS, min(self::MAX_EXPIRES_DAYS, $this->input->post->getInt('expires_days', self::DEFAULT_EXPIRES_DAYS)));
+
         try {
             $this->getCredentialRequestService()->approve(
                 $this->input->post->getString('id', ''),
                 (int) $user->id,
                 true,
-                time() + ($days * 86400)
+                $neverExpires ? null : time() + ($days * 86400)
             );
             $this->app->enqueueMessage(Text::_('COM_MCPSERVER_CREDENTIALS_APPROVE_SUCCESS'));
         } catch (\Throwable $e) {
@@ -195,6 +219,9 @@ class CredentialsController extends BaseController
      * acting user's own credentials. This is a Credentials-page action
      * (the setup card lives there, before credential requests), so it
      * redirects back to the credentials view.
+     *
+     * Takes no posted settings: metrics retention is configured only in
+     * Options > Monitoring & Metrics, so this action cannot overwrite it.
      */
     public function setup(): void
     {
@@ -202,10 +229,8 @@ class CredentialsController extends BaseController
             return;
         }
 
-        $retentionDays = $this->input->post->getInt('metrics_retention_days', 360);
-
         try {
-            $this->getGovernanceSetupService()->enable($retentionDays);
+            $this->getGovernanceSetupService()->enable();
             $this->app->enqueueMessage(Text::_('COM_MCPSERVER_GOVERNANCE_SETUP_SUCCESS'));
         } catch (\Throwable $e) {
             $this->app->enqueueMessage(Text::sprintf('COM_MCPSERVER_GOVERNANCE_SETUP_ERROR', $e->getMessage()), 'error');
@@ -227,7 +252,7 @@ class CredentialsController extends BaseController
             return;
         }
 
-        $retentionDays = $this->input->post->getInt('prune_retention_days', self::DEFAULT_EXPIRES_DAYS);
+        $retentionDays = $this->input->post->getInt('prune_retention_days', self::DEFAULT_PRUNE_RETENTION_DAYS);
 
         try {
             $deleted = $this->getGovernanceAuditRetentionService()->prune($retentionDays);
@@ -239,8 +264,48 @@ class CredentialsController extends BaseController
         $this->setRedirect('index.php?option=com_mcpserver&view=dashboard');
     }
 
+    /**
+     * Whether Governed Mode is switched on.
+     *
+     * This is the master switch for the whole credential workflow, not just for
+     * request authentication: with it off there is no credential page, no
+     * request, approval or claim, and no salt provisioning. Gating only the
+     * menu item would leave every task reachable by URL.
+     *
+     * Audit pruning is deliberately not gated on it — #__mcpserver_request_log
+     * is written in legacy shared-token mode too, so a site that never enables
+     * Governed Mode still needs to be able to trim it.
+     */
+    private function isGovernedModeEnabled(): bool
+    {
+        return (bool) ComponentHelper::getParams('com_mcpserver')->get('governed_mode', 0);
+    }
+
+    /**
+     * Refuse a credential task while Governed Mode is off, sending the operator
+     * to the one place that can change it.
+     */
+    private function requireGovernedMode(): bool
+    {
+        if ($this->isGovernedModeEnabled()) {
+            return true;
+        }
+
+        $this->setRedirect(
+            'index.php?option=com_mcpserver',
+            Text::_('COM_MCPSERVER_CREDENTIALS_GOVERNED_MODE_OFF'),
+            'warning'
+        );
+
+        return false;
+    }
+
     private function isAuthorised(): bool
     {
+        if (!$this->isGovernedModeEnabled()) {
+            return false;
+        }
+
         $user = $this->app->getIdentity();
 
         return $user !== null
@@ -272,7 +337,8 @@ class CredentialsController extends BaseController
      */
     private function isAuthorisedForSetupAndTokenValid(): bool
     {
-        return $this->isAuthorisedForCoreAdminAndTokenValid('index.php?option=com_mcpserver&view=credentials');
+        return $this->requireGovernedMode()
+            && $this->isAuthorisedForCoreAdminAndTokenValid('index.php?option=com_mcpserver&view=credentials');
     }
 
     /**
@@ -284,10 +350,21 @@ class CredentialsController extends BaseController
         return $this->isAuthorisedForCoreAdminAndTokenValid('index.php?option=com_mcpserver&view=dashboard');
     }
 
+    /**
+     * Require Joomla's global core.admin, matching approve/reject/delete.
+     *
+     * Both actions behind this gate — provisioning the credential salt and
+     * pruning the audit trail — mutate shared, site-wide governance state, and
+     * pruning is the most destructive operation the component offers. Scoping
+     * it to `core.admin` on com_mcpserver alone would leave a delegated
+     * component administrator able to erase the accountability record while
+     * being unable to approve a single credential, i.e. the loosest gate on
+     * the most damaging action.
+     */
     private function isAuthorisedForCoreAdminAndTokenValid(string $invalidTokenRedirect): bool
     {
         $user = $this->app->getIdentity();
-        if ($user === null || !$user->authorise('core.admin', 'com_mcpserver')) {
+        if ($user === null || !$user->authorise('core.admin')) {
             $this->setRedirect('index.php?option=com_mcpserver', Text::_('JERROR_ALERTNOAUTHOR'), 'error');
             return false;
         }
@@ -307,6 +384,10 @@ class CredentialsController extends BaseController
      */
     private function isAuthorisedForSuperUserAndTokenValid(string $invalidTokenRedirect): bool
     {
+        if (!$this->requireGovernedMode()) {
+            return false;
+        }
+
         $user = $this->app->getIdentity();
         if ($user === null || !$user->authorise('core.admin')) {
             $this->setRedirect('index.php?option=com_mcpserver', Text::_('JERROR_ALERTNOAUTHOR'), 'error');
@@ -359,7 +440,15 @@ class CredentialsController extends BaseController
                     ->where($db->quoteName('type') . ' = ' . $db->quote('component'));
                 $db->setQuery($update)->execute();
             },
-            static fn (): string => (string) Factory::getApplication()->get('secret', '')
+            static fn (): string => (string) Factory::getApplication()->get('secret', ''),
+            static function (): int {
+                $db = Factory::getDbo();
+                $query = $db->getQuery(true)
+                    ->select('COUNT(*)')
+                    ->from($db->quoteName('#__mcpserver_credential'));
+
+                return (int) $db->setQuery($query)->loadResult();
+            }
         );
     }
 

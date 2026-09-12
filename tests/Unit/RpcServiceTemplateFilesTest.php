@@ -12,6 +12,7 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 
 defined('_JEXEC') or die;
 
+use Joomla\CMS\Component\ComponentHelper;
 use Joomla\CMS\Factory;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
@@ -22,6 +23,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\SchemaValidator;
 use Joomla\Component\Mcpserver\Administrator\Service\SimpleArrayCache;
 use Joomla\Component\Mcpserver\Administrator\Service\ToolRegistry;
 use Joomla\Component\Mcpserver\Tests\Stubs\StubDatabase;
+use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -45,6 +47,7 @@ class RpcServiceTemplateFilesTest extends TestCase
     {
         $this->removeTree(JPATH_ROOT);
         Factory::reset();
+        ComponentHelper::reset();
     }
 
     public function testUpdateTemplateFileCreatesANewFileInAnExistingOverrideDirectory(): void
@@ -148,7 +151,11 @@ class RpcServiceTemplateFilesTest extends TestCase
             'element' => 'cassiopeia',
             'client_id' => 0,
         ];
-        Factory::$database = $db;
+        Factory::$dbo = $db;
+
+        // Empty params: the editable-extension allowlist then falls back to the
+        // com_templates defaults, which is what a stock site edits with.
+        ComponentHelper::$params = new Registry([]);
 
         return $this->makeService()->handle([
             'jsonrpc' => '2.0',

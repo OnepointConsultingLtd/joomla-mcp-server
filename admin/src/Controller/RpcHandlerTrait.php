@@ -494,12 +494,20 @@ trait RpcHandlerTrait
      * "target". Deliberately an allowlist of IDs/paths, never free-text
      * fields (title, content, introtext, ...), so mutation content is never
      * persisted to the governance audit trail or Joomla Action Log.
+     *
+     * A local array rather than a class constant: traits may not declare
+     * constants before PHP 8.2, and the component supports PHP 8.1.
+     *
+     * @return list<string>
      */
-    private const TARGET_ID_KEYS = ['id', 'version_id', 'extension_id', 'catid', 'path', 'new_path'];
+    private function targetIdKeys(): array
+    {
+        return ['id', 'version_id', 'extension_id', 'catid', 'path', 'new_path'];
+    }
 
     /**
      * Build a sanitized target string ("id=10;path=banners/logo.png") from a
-     * tools/call request's arguments, restricted to TARGET_ID_KEYS. Returns
+     * tools/call request's arguments, restricted to targetIdKeys(). Returns
      * null for non-tool-call methods or when no identifier is present (e.g.
      * a create_* call that has not yet been assigned an id).
      */
@@ -513,7 +521,7 @@ trait RpcHandlerTrait
         $arguments = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
 
         $parts = [];
-        foreach (self::TARGET_ID_KEYS as $key) {
+        foreach ($this->targetIdKeys() as $key) {
             $value = $arguments[$key] ?? null;
             if (is_string($value) || is_int($value)) {
                 $parts[] = $key . '=' . $value;

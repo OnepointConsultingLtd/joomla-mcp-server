@@ -14,8 +14,6 @@ namespace Joomla\CMS {
         public static ?object $application = null;
         public static ?object $dbo = null;
 
-        public static ?object $database = null;
-
         public static function getApplication(): object
         {
             if (self::$application === null) {

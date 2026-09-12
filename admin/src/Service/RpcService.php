@@ -18,6 +18,7 @@ use Joomla\CMS\Cache\Cache;
 use Joomla\CMS\Event\Cache\AfterPurgeEvent;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Version as JoomlaVersion;
+use Joomla\Database\DatabaseInterface;
 use Psr\Log\LoggerInterface;
 
 class RpcService
@@ -1692,12 +1693,26 @@ class RpcService
             $module->params = json_encode(array_merge($current, $params['params']));
         }
 
+        // Menu (page) assignment lives in #__modules_menu, not in the module row.
+        // Resolve it before any write so an invalid assignment cannot leave the
+        // scalar columns updated and the assignment half-applied.
+        $assignmentSupplied = array_key_exists('assignment', $params) || array_key_exists('assigned', $params);
+        $menuIds = $assignmentSupplied ? $this->resolveModuleMenuAssignment($db, $client, $params) : [];
+
+        $hasColumnChanges = count(get_object_vars($module)) > 1;
+
         // Bail out if there is nothing to change beyond the id.
-        if (count(get_object_vars($module)) <= 1) {
+        if (!$hasColumnChanges && !$assignmentSupplied) {
             throw new \InvalidArgumentException('No updatable fields supplied');
         }
 
-        $db->updateObject('#__modules', $module, 'id');
+        if ($hasColumnChanges) {
+            $db->updateObject('#__modules', $module, 'id');
+        }
+
+        if ($assignmentSupplied) {
+            $this->writeModuleMenuAssignment($db, $id, $menuIds);
+        }
 
         $this->cache->delete('module:' . $client . ':' . $id);
         $this->cache->delete('modules_list:' . $client);
@@ -1708,6 +1723,150 @@ class RpcService
             : 'api/index.php/v1/modules/site/';
 
         return $this->rest->get($path . $id);
+    }
+
+    /**
+     * Translate the supplied assignment/assigned arguments into the #__modules_menu
+     * menuids Joomla expects, validating them before anything is written: 0 = every
+     * page (a single row with menuid 0), 1 = only the listed menu items (positive
+     * menuids), -1 = every page except them (negative menuids), "-" = no page at all
+     * (no rows). This mirrors ModuleModel::save() in com_modules, sign included, so a
+     * module assigned here behaves exactly like one saved in the administrator.
+     *
+     * Combinations core silently reinterprets are rejected instead: it turns
+     * assignment -1 with an empty list into "all pages" and assignment 1 with an empty
+     * list into "no pages", neither of which is what such a call asked for.
+     *
+     * @param   array<string, mixed>  $params
+     *
+     * @return  list<int>  The menuids to store; an empty list means "no pages".
+     */
+    private function resolveModuleMenuAssignment(DatabaseInterface $db, string $client, array $params): array
+    {
+        // #__modules_menu is only meaningful for site modules: ModuleHelper matches
+        // "menuid = Itemid OR menuid <= 0" with Itemid 0 in the administrator, so a
+        // positive menuid would simply hide an administrator module from the backend.
+        if ($client === 'administrator') {
+            throw new \InvalidArgumentException(
+                'Menu assignment applies to site modules only; administrator modules are not assigned to menu items'
+            );
+        }
+
+        if (!array_key_exists('assignment', $params)) {
+            throw new \InvalidArgumentException(
+                'assignment is required when assigned is supplied (0 = all pages, 1 = only the selected pages, '
+                . '-1 = all pages except the selected pages, "-" = no pages)'
+            );
+        }
+
+        $assignment = $params['assignment'];
+        if (is_string($assignment) && is_numeric($assignment)) {
+            $assignment = (int) $assignment;
+        }
+
+        if (!in_array($assignment, [0, 1, -1, '-'], true)) {
+            throw new \InvalidArgumentException(
+                'assignment must be 0 (all pages), 1 (only the selected pages), -1 (all pages except the selected '
+                . 'pages) or "-" (no pages)'
+            );
+        }
+
+        $assigned = $params['assigned'] ?? [];
+        if (!is_array($assigned)) {
+            throw new \InvalidArgumentException('assigned must be an array of menu item IDs');
+        }
+
+        if ($assignment === 0 || $assignment === '-') {
+            if ($assigned !== []) {
+                throw new \InvalidArgumentException(
+                    'assigned cannot be combined with assignment ' . ($assignment === 0 ? '0' : '"-"')
+                    . '; use assignment 1 or -1 to select menu items'
+                );
+            }
+
+            return $assignment === 0 ? [0] : [];
+        }
+
+        // Joomla stores the excluded ids of an "all except" assignment as negative
+        // menuids and get_module_by_id reports them that way, so accept either sign
+        // and apply the mode's own — feeding a module's own values back is then safe.
+        $menuIds = [];
+        foreach ($assigned as $itemId) {
+            $itemId = abs((int) $itemId);
+
+            if ($itemId === 0) {
+                throw new \InvalidArgumentException('assigned must contain menu item IDs greater than zero');
+            }
+
+            $menuIds[$itemId] = $assignment * $itemId;
+        }
+
+        if ($menuIds === []) {
+            throw new \InvalidArgumentException(
+                'assigned must list at least one menu item ID when assignment is ' . $assignment
+            );
+        }
+
+        $this->assertSiteMenuItemsExist($db, array_keys($menuIds));
+
+        return array_values($menuIds);
+    }
+
+    /**
+     * Reject menu item ids that are not site menu items. Joomla would store such a row
+     * happily and the module would simply never appear, which is hard to tell apart
+     * from a rendering problem.
+     *
+     * @param  list<int>  $itemIds
+     */
+    private function assertSiteMenuItemsExist(DatabaseInterface $db, array $itemIds): void
+    {
+        $query = $db->getQuery(true)
+            ->select($db->quoteName('id'))
+            ->from($db->quoteName('#__menu'))
+            ->where($db->quoteName('id') . ' IN (' . implode(', ', $itemIds) . ')')
+            ->where($db->quoteName('client_id') . ' = 0');
+
+        $found = array_map('intval', (array) $db->setQuery($query)->loadColumn());
+        $missing = array_values(array_diff($itemIds, $found));
+
+        if ($missing !== []) {
+            throw new \InvalidArgumentException(
+                count($missing) === 1
+                    ? 'Menu item ' . $missing[0] . ' does not exist as a site menu item'
+                    : 'Menu items ' . implode(', ', $missing) . ' do not exist as site menu items'
+            );
+        }
+    }
+
+    /**
+     * Replace a module's page assignment rows. Joomla derives the assignment mode from
+     * the sign of the stored menuids, so the set is rewritten wholesale — a merge
+     * could leave rows of two different modes behind and render the module twice.
+     *
+     * @param  list<int>  $menuIds
+     */
+    private function writeModuleMenuAssignment(DatabaseInterface $db, int $moduleId, array $menuIds): void
+    {
+        $db->setQuery(
+            $db->getQuery(true)
+                ->delete($db->quoteName('#__modules_menu'))
+                ->where($db->quoteName('moduleid') . ' = ' . $moduleId)
+        )->execute();
+
+        if ($menuIds === []) {
+            return;
+        }
+
+        $query = $db->getQuery(true)
+            ->insert($db->quoteName('#__modules_menu'))
+            ->columns($db->quoteName(['moduleid', 'menuid']));
+
+        foreach ($menuIds as $menuId) {
+            $query->values($moduleId . ', ' . $menuId);
+        }
+
+        $db->setQuery($query)->execute();
     }
 
     private function listMenus(array $params): array

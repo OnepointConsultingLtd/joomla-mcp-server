@@ -79,7 +79,7 @@ Article versioning tools require Joomla article versioning to be enabled.
 | `list_modules` | List all Joomla modules |
 | `get_module_by_id` | Retrieve a Joomla module by ID |
 | `create_module` | Create a new module of any installed type (type-specific settings via `params`) |
-| `update_module` | Update any Joomla module (all types); merges type-specific params |
+| `update_module` | Update any Joomla module (all types); merges type-specific params and sets the menu (page) assignment |
 | `delete_module` | Delete a Joomla module and its page assignments |
 
 ### Menus and menu items

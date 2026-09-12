@@ -478,7 +478,8 @@ class ToolRegistry
             'name' => 'update_module',
             'description' => 'Update any Joomla module (works for all module types). Only the fields you supply are changed; '
                 . '"params" is the module type\'s own settings and is merged into the existing params (send only the keys you '
-                . 'want to change). Call get_module_by_id first to inspect a module\'s current params.',
+                . 'want to change). "assignment"/"assigned" set which pages the module shows on and are left untouched when '
+                . 'omitted. Call get_module_by_id first to inspect a module\'s current params and page assignment.',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
@@ -504,6 +505,18 @@ class ToolRegistry
                         'type' => 'object',
                         'description' => 'Module type-specific settings, merged into the existing params. Send only the keys to change.',
                         'additionalProperties' => true,
+                    ],
+                    'assignment' => [
+                        'enum' => [0, 1, -1, '-'],
+                        'description' => 'Menu (page) assignment mode: 0 = all pages, 1 = only the menu items listed in "assigned", '
+                            . '-1 = all pages except those menu items, "-" = no pages at all. Required whenever "assigned" is sent. '
+                            . 'Site modules only. Omit both fields to leave the current assignment untouched.',
+                    ],
+                    'assigned' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'integer'],
+                        'description' => 'Menu item IDs (Itemid) the assignment applies to; replaces the module\'s current selection. '
+                            . 'Required when assignment is 1 or -1, and must be omitted for assignment 0 and "-".',
                     ],
                     'client' => [
                         'type' => 'string',

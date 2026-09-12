@@ -53,7 +53,6 @@ HTMLHelper::_('behavior.core');
             </a>
         </div>
     <?php endif; ?>
-    
     <div class="card mb-4 shadow-sm">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0">MCP Client Configuration</h5>

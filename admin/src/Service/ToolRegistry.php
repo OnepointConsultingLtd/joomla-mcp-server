@@ -1160,8 +1160,9 @@ class ToolRegistry
 
         $this->register([
             'name' => 'update_template_file',
-            'description' => 'Overwrite the source of an existing template file (Joomla\'s template "Customise" editor). The file must already '
-                . 'exist; create overrides with create_template_override first. Line endings are normalised to Unix, and joomla.asset.json '
+            'description' => 'Write the source of a template file (Joomla\'s template "Customise" editor). Overwrites the file if it exists, '
+                . 'otherwise creates it, provided its parent directory already exists — use create_template_override to add a new override '
+                . 'folder first. The response reports `created`. Line endings are normalised to Unix, and joomla.asset.json '
                 . 'must remain valid JSON. `path` is relative to the template root. '
                 . 'WARNING: this can write executable PHP into the site — arbitrary code execution; only allow trusted callers.',
             'inputSchema' => [

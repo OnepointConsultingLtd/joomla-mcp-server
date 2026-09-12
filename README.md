@@ -2,7 +2,7 @@
 
 A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server over HTTP JSON-RPC. It lets MCP clients such as Claude Desktop and Cursor work with Joomla content through the site's own Joomla Web Services API.
 
-**Version:** 1.8.1 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
+**Version:** 1.8.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
 
 ## Features
 
@@ -143,7 +143,7 @@ Article versioning tools require Joomla article versioning to be enabled.
 |---|---|
 | `list_template_files` | List editable source files of an installed template (Joomla's "Customise" view) |
 | `get_template_file` | Read the source of a single template file |
-| `update_template_file` | Overwrite the source of an existing template file |
+| `update_template_file` | Write the source of a template file, creating it if its parent directory exists |
 | `create_template_override` | Create a template override by copying a core view, module, plugin or layout into the template |
 
 ### Extensions

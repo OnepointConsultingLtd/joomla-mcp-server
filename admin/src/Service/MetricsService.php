@@ -53,7 +53,7 @@ class MetricsService
      */
     private function retentionDays(): int
     {
-        return max(1, (int) $this->params->get('metrics_retention_days', 30));
+        return max(1, (int) $this->params->get('metrics_retention_days', 360));
     }
 
     /**

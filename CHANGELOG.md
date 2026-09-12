@@ -2,6 +2,16 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## 1.8.0 - 2026-09-07
+
+- Replaced direct credential issuance with an approval workflow: eligible users request access, a different Super User approves or rejects it with a per-request expiry, and the owner claims approved requests with their own validated Joomla API token.
+- Added pending request review and all-credential metadata administration queues while preserving owner-only credential listings for regular users.
+- Documented the governed credential request, approval, and claim workflow.
+- Added Governed Mode: per-client issued, revocable credentials that authenticate MCP requests individually and make outbound Joomla API calls with each user's own API token instead of the single shared token, with a `#__mcpserver_credential` table storing encrypted tokens keyed on a generated credential salt.
+- Added a governance audit trail (extended `#__mcpserver_request_log` columns: `request_id`, `credential_id`, `user_id`, `credential_selector`, `target`) and attribution of successful mutating tool calls made under a governed credential to Joomla's core Action Logs, when the `System - Action Logs` plugin is enabled.
+- Added a **My Credentials** administrator page for provisioning Governed Mode, issuing and revoking per-user credentials, and viewing the recovery key fingerprint.
+- Documented Governed Mode setup, migrating clients off the shared bearer/API token, rollback and recovery, and the Joomla Action Logs prerequisite in the README.
+
 ## 1.7.1 - 2026-09-07
 
 - `update_template_file` now creates a file when it does not exist, provided its parent directory already does (for example a second layout in an existing override folder). The response reports `created`.

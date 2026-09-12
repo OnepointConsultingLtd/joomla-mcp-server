@@ -56,6 +56,9 @@ class RpcService
     private PromptRegistry $promptRegistry;
     private string $serverName;
     private int $toolsListPageSize;
+    private ?AuthenticatedPrincipal $principal;
+    private ?GovernedToolAuthorizer $authorizer;
+    private bool $allowRawArticleContent;
 
     /**
      * Whether the last handled tools/call was denied by policy (disabled tool
@@ -75,7 +78,9 @@ class RpcService
         SchemaValidator $validator,
         PromptRegistry $promptRegistry,
         string $serverName = 'joomla-mcp-server',
-        int $toolsListPageSize = self::DEFAULT_TOOLS_LIST_PAGE_SIZE
+        int $toolsListPageSize = self::DEFAULT_TOOLS_LIST_PAGE_SIZE,
+        ?AuthenticatedPrincipal $principal = null,
+        ?GovernedToolAuthorizer $authorizer = null
     ) {
         $this->rest = $rest;
         $this->cache = $cache;
@@ -86,6 +91,9 @@ class RpcService
         $this->promptRegistry = $promptRegistry;
         $this->serverName = $serverName;
         $this->toolsListPageSize = max(1, $toolsListPageSize);
+        $this->principal = $principal;
+        $this->authorizer = $authorizer;
+        $this->allowRawArticleContent = $principal === null;
 
         $this->registerToolExecutors();
         $this->registerPromptBuilders();
@@ -819,6 +827,18 @@ class RpcService
             }
         }
 
+        // API-only tools continue through the principal's own Joomla API token.
+        // Direct/mixed executors bypass that API boundary, so governed requests
+        // require an explicit Joomla ACL decision before any executor runs.
+        if (
+            $this->authorizer !== null
+            && ($this->principal === null || !$this->authorizer->authorise($this->principal, $toolName, $toolParams))
+        ) {
+            $this->lastCallBlocked = true;
+
+            return JsonRpc::successResponse($id, $this->formatToolError('Tool access is not authorized.'));
+        }
+
         try {
             $result = $this->toolRegistry->execute($toolName, $toolParams);
 
@@ -899,6 +919,13 @@ class RpcService
      */
     private function injectRawArticleContent(array $response): array
     {
+        // Governed principals must only see the Joomla Web Services response
+        // authorized by their own API token. Legacy shared-token operation
+        // retains the existing raw-content round-trip behavior.
+        if (!$this->allowRawArticleContent) {
+            return $response;
+        }
+
         $ids = [];
         if (isset($response['data']['id'])) {
             $ids[] = (int) $response['data']['id'];
@@ -2900,6 +2927,10 @@ class RpcService
         $enabled = (int) $params['enabled'] === 1 ? 1 : 0;
 
         $row = $this->loadExtensionRow($extensionId);
+
+        if (($row['type'] ?? '') !== 'plugin') {
+            throw new \InvalidArgumentException('Only plugin extensions can have their state changed');
+        }
 
         if ($enabled === 0 && (int) $row['protected'] === 1) {
             throw new \InvalidArgumentException(

@@ -3,5 +3,7 @@
 	<section name="component">
         <action name="core.admin" title="JACTION_ADMIN" description="JACTION_ADMIN_EMS_DESC" />
         <action name="core.manage" title="JACTION_MANAGE" description="JACTION_MANAGE_EMS_DESC" />
+        <action name="mcpserver.credential.self" title="COM_MCPSERVER_ACTION_CREDENTIAL_SELF" description="COM_MCPSERVER_ACTION_CREDENTIAL_SELF_DESC" />
+        <action name="mcpserver.credential.audit" title="COM_MCPSERVER_ACTION_CREDENTIAL_AUDIT" description="COM_MCPSERVER_ACTION_CREDENTIAL_AUDIT_DESC" />
 	</section>
 </access>

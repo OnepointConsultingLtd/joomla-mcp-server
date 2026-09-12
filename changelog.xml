@@ -3,6 +3,17 @@
     <changelog>
         <element>com_mcpserver</element>
         <type>component</type>
+        <version>1.8.0</version>
+        <addition>
+            <item>Added governed credential requests: eligible users request access, a different Super User approves or rejects it with a selected expiry, and the request owner claims it by submitting their own validated Joomla API token.</item>
+            <item>Added pending request review and credential metadata administration queues without exposing credential secrets.</item>
+            <item>Added Governed Mode: per-client issued, revocable credentials that authenticate MCP requests individually and make outbound Joomla API calls with each user's own API token instead of the single shared token, with a #__mcpserver_credential table storing encrypted tokens keyed on a generated credential salt.</item>
+            <item>Added a governance audit trail (extended #__mcpserver_request_log columns: request_id, credential_id, user_id, credential_selector, target) and attribution of successful mutating tool calls made under a governed credential to Joomla's core Action Logs, when the System - Action Logs plugin is enabled.</item>
+            <item>Added a My Credentials administrator page for provisioning Governed Mode, issuing and revoking per-user credentials, and viewing the recovery key fingerprint.</item>
+        </addition>
+        <change>
+            <item>Replaced the direct administrator credential issuance form and documented the request, approval, and claim workflow.</item>
+            <item>Documented Governed Mode setup, migrating clients off the shared bearer/API token, rollback and recovery, and the Joomla Action Logs prerequisite in the README.</item>
         <version>1.7.1</version>
         <addition>
             <item>Added a backup warning on the component landing page, reminding administrators to take a full backup and test with Read-Only Mode before connecting a write-capable LLM client.</item>

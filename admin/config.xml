@@ -3,7 +3,8 @@
     <fieldset name="basic" label="COM_MCPSERVER_CONFIG_FIELDSET_BASIC">
         <field name="server_name" type="text" label="COM_MCPSERVER_CONFIG_SERVER_NAME" description="COM_MCPSERVER_CONFIG_SERVER_NAME_DESC" default="joomla-mcp-server" />
         <field name="base_url" type="url" label="COM_MCPSERVER_CONFIG_BASE_URL" description="COM_MCPSERVER_CONFIG_BASE_URL_DESC" />
-        <field name="api_token" type="textarea" label="COM_MCPSERVER_CONFIG_API_TOKEN" description="COM_MCPSERVER_CONFIG_API_TOKEN_DESC" filter="raw" rows="3" cols="80" />
+        <field name="api_token" type="textarea" label="COM_MCPSERVER_CONFIG_API_TOKEN" description="COM_MCPSERVER_CONFIG_API_TOKEN_DESC" filter="raw" rows="3" cols="80" showon="governed_mode:0" />
+        <field name="governed_api_token_notice" type="note" label="COM_MCPSERVER_CONFIG_API_TOKEN_DISABLED" description="COM_MCPSERVER_CONFIG_API_TOKEN_DISABLED_DESC" class="alert alert-info" showon="governed_mode:1" />
         <field name="verify_ssl" type="radio" label="COM_MCPSERVER_CONFIG_VERIFY_SSL" description="COM_MCPSERVER_CONFIG_VERIFY_SSL_DESC" default="1" class="btn-group">
             <option value="0">JNO</option>
             <option value="1">JYES</option>
@@ -28,6 +29,11 @@
             <option value="1">JYES</option>
         </field>
         <field name="disabled_tools" type="textarea" label="COM_MCPSERVER_CONFIG_DISABLED_TOOLS" description="COM_MCPSERVER_CONFIG_DISABLED_TOOLS_DESC" rows="4" filter="raw" default="install_extension, uninstall_extension, update_template_file" />
+        <field name="governed_mode" type="radio" label="COM_MCPSERVER_CONFIG_GOVERNED_MODE" description="COM_MCPSERVER_CONFIG_GOVERNED_MODE_DESC" default="0" class="btn-group">
+            <option value="0">JNO</option>
+            <option value="1">JYES</option>
+        </field>
+        <field name="credential_salt" type="hidden" default="" />
         <field name="resources_enabled" type="radio" label="COM_MCPSERVER_CONFIG_RESOURCES_ENABLED" description="COM_MCPSERVER_CONFIG_RESOURCES_ENABLED_DESC" default="1" class="btn-group">
             <option value="0">JNO</option>
             <option value="1">JYES</option>
@@ -42,6 +48,6 @@
             <option value="0">JNO</option>
             <option value="1">JYES</option>
         </field>
-        <field name="metrics_retention_days" type="integer" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="30" min="1" max="365" />
+        <field name="metrics_retention_days" type="integer" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="360" min="1" max="3650" />
     </fieldset>
 </config>

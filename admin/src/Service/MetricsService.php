@@ -13,6 +13,7 @@ namespace Joomla\Component\Mcpserver\Administrator\Service;
 defined('_JEXEC') or die;
 
 use Joomla\CMS\Factory;
+use Joomla\Database\DatabaseInterface;
 use Joomla\Registry\Registry;
 
 /**
@@ -23,6 +24,10 @@ use Joomla\Registry\Registry;
  * request it is measuring, so record() swallows every throwable. Read methods
  * likewise return safe zero/empty defaults if the table is missing (e.g. on a
  * half-upgraded site) so the dashboard always renders.
+ *
+ * Every read method honours the instance's user scope (see withUserScope()),
+ * so the dashboard can show a non-Super-User only the rows attributed to
+ * their own account.
  */
 class MetricsService
 {
@@ -35,9 +40,50 @@ class MetricsService
 
     private Registry $params;
 
+    /**
+     * Joomla user id that every read is restricted to, or null to read the
+     * whole log.
+     */
+    private ?int $userScope = null;
+
     public function __construct(Registry $params)
     {
         $this->params = $params;
+    }
+
+    /**
+     * Return a copy of this service whose reads only see rows attributed to
+     * $userId; pass null for the unrestricted view.
+     *
+     * The scope is a property of the instance rather than an argument on each
+     * read because there are five read methods and one caller: making it a
+     * per-call filter would mean a new or edited call site could silently
+     * widen a restricted user's view back to the whole site's request log.
+     * The instance is cloned so the DI container's shared, unscoped service
+     * is never mutated by a scoped caller.
+     *
+     * Neither record() nor prune() is scoped: both operate on the log as a
+     * whole regardless of who triggered them.
+     */
+    public function withUserScope(?int $userId): self
+    {
+        $scoped = clone $this;
+        $scoped->userScope = $userId;
+
+        return $scoped;
+    }
+
+    /**
+     * SQL condition restricting a read to the scoped user, or null when this
+     * instance reads the whole log.
+     */
+    private function userScopeCondition(DatabaseInterface $db): ?string
+    {
+        if ($this->userScope === null) {
+            return null;
+        }
+
+        return $db->quoteName('user_id') . ' = ' . (int) $this->userScope;
     }
 
     /**
@@ -53,7 +99,7 @@ class MetricsService
      */
     private function retentionDays(): int
     {
-        return max(1, (int) $this->params->get('metrics_retention_days', 30));
+        return max(1, (int) $this->params->get('metrics_retention_days', 360));
     }
 
     /**
@@ -134,6 +180,11 @@ class MetricsService
                 ])
                 ->from($table);
 
+            $scope = $this->userScopeCondition($db);
+            if ($scope !== null) {
+                $query->where($scope);
+            }
+
             $row = $db->setQuery($query)->loadAssoc();
 
             if (!$row) {
@@ -192,6 +243,11 @@ class MetricsService
                 ->group($col)
                 ->order('count DESC');
 
+            $scope = $this->userScopeCondition($db);
+            if ($scope !== null) {
+                $query->where($scope);
+            }
+
             $db->setQuery($query, 0, max(1, $limit));
             $rows = $db->loadAssocList();
 
@@ -237,6 +293,11 @@ class MetricsService
                 ->where($db->quoteName('created') . ' >= ' . $since)
                 ->group('DATE(' . $db->quoteName('created') . ')');
 
+            $scope = $this->userScopeCondition($db);
+            if ($scope !== null) {
+                $query->where($scope);
+            }
+
             $rows = $db->setQuery($query)->loadAssocList();
 
             foreach ($rows ?: [] as $row) {
@@ -267,6 +328,11 @@ class MetricsService
                 ->from($db->quoteName(self::TABLE))
                 ->order($db->quoteName('id') . ' DESC');
 
+            $scope = $this->userScopeCondition($db);
+            if ($scope !== null) {
+                $query->where($scope);
+            }
+
             $db->setQuery($query, 0, max(1, $limit));
 
             return $db->loadObjectList() ?: [];
@@ -277,6 +343,9 @@ class MetricsService
 
     /**
      * Delete rows older than the configured retention window.
+     *
+     * Deliberately ignores the user scope: retention trims the whole log to
+     * the configured window regardless of who is looking at the dashboard.
      *
      * @return int  Number of rows deleted.
      */

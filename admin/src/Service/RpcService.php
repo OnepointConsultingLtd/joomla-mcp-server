@@ -56,6 +56,9 @@ class RpcService
     private PromptRegistry $promptRegistry;
     private string $serverName;
     private int $toolsListPageSize;
+    private ?AuthenticatedPrincipal $principal;
+    private ?GovernedToolAuthorizer $authorizer;
+    private bool $allowRawArticleContent;
 
     /**
      * Whether the last handled tools/call was denied by policy (disabled tool
@@ -66,6 +69,8 @@ class RpcService
      */
     private bool $lastCallBlocked = false;
 
+    private bool $lastCallFailed = false;
+
     public function __construct(
         RestClient $rest,
         CacheService $cache,
@@ -75,7 +80,9 @@ class RpcService
         SchemaValidator $validator,
         PromptRegistry $promptRegistry,
         string $serverName = 'joomla-mcp-server',
-        int $toolsListPageSize = self::DEFAULT_TOOLS_LIST_PAGE_SIZE
+        int $toolsListPageSize = self::DEFAULT_TOOLS_LIST_PAGE_SIZE,
+        ?AuthenticatedPrincipal $principal = null,
+        ?GovernedToolAuthorizer $authorizer = null
     ) {
         $this->rest = $rest;
         $this->cache = $cache;
@@ -86,6 +93,18 @@ class RpcService
         $this->promptRegistry = $promptRegistry;
         $this->serverName = $serverName;
         $this->toolsListPageSize = max(1, $toolsListPageSize);
+        // A governed principal without an authorizer would run every
+        // direct/mixed executor — install_extension, update_template_file and
+        // the rest of the core.admin set — with no local ACL check at all.
+        // Reject the pairing here rather than relying on every construction
+        // site to remember it.
+        if ($principal !== null && $authorizer === null) {
+            throw new \LogicException('A governed principal requires a GovernedToolAuthorizer');
+        }
+
+        $this->principal = $principal;
+        $this->authorizer = $authorizer;
+        $this->allowRawArticleContent = $principal === null;
 
         $this->registerToolExecutors();
         $this->registerPromptBuilders();
@@ -196,9 +215,24 @@ class RpcService
         return $this->lastCallBlocked;
     }
 
+    /**
+     * Whether the last tools/call threw and was converted into an MCP tool
+     * error result.
+     *
+     * Such a failure is returned as a JSON-RPC *success* envelope carrying
+     * isError=true (per the MCP spec), so it is invisible to a caller
+     * inspecting $response['error']. Without this the audit trail and the
+     * Joomla Action Log would record a failed mutation as 'ok'.
+     */
+    public function wasLastCallFailed(): bool
+    {
+        return $this->lastCallFailed;
+    }
+
     public function handle(array $request): ?array
     {
         $this->lastCallBlocked = false;
+        $this->lastCallFailed = false;
 
         $id = $request['id'] ?? null;
         $isNotification = !array_key_exists('id', $request);
@@ -819,11 +853,31 @@ class RpcService
             }
         }
 
+        // API-only tools continue through the principal's own Joomla API token.
+        // Direct/mixed executors bypass that API boundary, so governed requests
+        // require an explicit Joomla ACL decision before any executor runs.
+        // Anchored on the principal, not the authorizer: a missing authorizer
+        // must deny, never grant. The constructor already rejects that pairing;
+        // this keeps the guard correct even if that check is ever relaxed.
+        if (
+            $this->principal !== null
+            && ($this->authorizer === null || !$this->authorizer->authorise($this->principal, $toolName, $toolParams))
+        ) {
+            $this->lastCallBlocked = true;
+
+            return JsonRpc::successResponse($id, $this->formatToolError('Tool access is not authorized.'));
+        }
+
         try {
             $result = $this->toolRegistry->execute($toolName, $toolParams);
 
             return JsonRpc::successResponse($id, $this->formatToolSuccess($result));
         } catch (\Throwable $e) {
+            // Mark the call failed so the caller does not audit this as 'ok':
+            // the response below is a JSON-RPC success envelope carrying an
+            // MCP isError result, not a JSON-RPC error.
+            $this->lastCallFailed = true;
+
             $this->logger->error('Tool execution failed', [
                 'tool' => $toolName,
                 'error' => $e->getMessage(),
@@ -899,6 +953,13 @@ class RpcService
      */
     private function injectRawArticleContent(array $response): array
     {
+        // Governed principals must only see the Joomla Web Services response
+        // authorized by their own API token. Legacy shared-token operation
+        // retains the existing raw-content round-trip behavior.
+        if (!$this->allowRawArticleContent) {
+            return $response;
+        }
+
         $ids = [];
         if (isset($response['data']['id'])) {
             $ids[] = (int) $response['data']['id'];
@@ -2900,6 +2961,19 @@ class RpcService
         $enabled = (int) $params['enabled'] === 1 ? 1 : 0;
 
         $row = $this->loadExtensionRow($extensionId);
+
+        // Governed mode only. GovernedToolAuthorizer maps this tool through
+        // 'plugin_extension', so it can only produce an ACL decision for a
+        // plugin row; anything else has no asset to authorise against and must
+        // not proceed. In legacy shared-token mode there is no such mapping,
+        // and the tool's own schema and list_extensions advertise every
+        // extension type — restricting it there would silently break existing
+        // workflows that disable a module or unpublish a template.
+        if ($this->principal !== null && ($row['type'] ?? '') !== 'plugin') {
+            throw new \InvalidArgumentException(
+                'In governed mode only plugin extensions can have their state changed'
+            );
+        }
 
         if ($enabled === 0 && (int) $row['protected'] === 1) {
             throw new \InvalidArgumentException(

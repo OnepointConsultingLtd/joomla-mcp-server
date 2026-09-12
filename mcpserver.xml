@@ -6,7 +6,7 @@
     <authorEmail>allan@onepointltd.com</authorEmail>
     <copyright>Copyright (C) 2026 Onepoint Consulting Ltd</copyright>
     <creationDate>2025-08-13</creationDate>
-    <version>1.7.1</version>
+    <version>1.8.0</version>
     <license>GPL-2.0-or-later</license>
     <description>Model Context Protocol server component for Joomla</description>
     <element>com_mcpserver</element>
@@ -44,9 +44,18 @@
     <administration>
         <namespace path="src">Joomla\Component\Mcpserver</namespace>
         <menu>MCP Server for Joomla</menu>
+        <!--
+            Options is deliberately not a submenu entry: Joomla renders it as a
+            toolbar button on each view, and a menu item of the same name that
+            opened the landing page instead was the source of a confusing double
+            "Options". Manage Credentials is not one either — it is reachable from
+            the Client Configuration page only while Governed Mode is on,
+            because the administrator Components menu cannot be filtered on a
+            component parameter without shipping a plugin.
+        -->
         <submenu>
+            <menu link="option=com_mcpserver&amp;view=mcpcomponent">COM_MCPSERVER_SUBMENU_CLIENT_CONFIG</menu>
             <menu link="option=com_mcpserver&amp;view=dashboard">COM_MCPSERVER_SUBMENU_DASHBOARD</menu>
-            <menu link="option=com_mcpserver">Options</menu>
         </submenu>
         <languages folder="admin/language">
             <language tag="en-GB">en-GB/en-GB.com_mcpserver.ini</language>
@@ -76,7 +85,8 @@
             <fieldset name="basic" label="COM_MCPSERVER_CONFIG_FIELDSET_BASIC">
                 <field name="server_name" type="text" label="COM_MCPSERVER_CONFIG_SERVER_NAME" description="COM_MCPSERVER_CONFIG_SERVER_NAME_DESC" default="joomla-mcp-server" />
                 <field name="base_url" type="url" label="COM_MCPSERVER_CONFIG_BASE_URL" description="COM_MCPSERVER_CONFIG_BASE_URL_DESC" />
-                <field name="api_token" type="textarea" label="COM_MCPSERVER_CONFIG_API_TOKEN" description="COM_MCPSERVER_CONFIG_API_TOKEN_DESC" filter="raw" rows="3" cols="80" />
+                <field name="api_token" type="textarea" label="COM_MCPSERVER_CONFIG_API_TOKEN" description="COM_MCPSERVER_CONFIG_API_TOKEN_DESC" filter="raw" rows="3" cols="80" showon="governed_mode:0" />
+                <field name="governed_api_token_notice" type="note" label="COM_MCPSERVER_CONFIG_API_TOKEN_DISABLED" description="COM_MCPSERVER_CONFIG_API_TOKEN_DISABLED_DESC" class="alert alert-info" showon="governed_mode:1" />
                 <field name="verify_ssl" type="radio" label="COM_MCPSERVER_CONFIG_VERIFY_SSL" description="COM_MCPSERVER_CONFIG_VERIFY_SSL_DESC" default="1" class="btn-group">
                     <option value="0">JNO</option>
                     <option value="1">JYES</option>
@@ -92,21 +102,26 @@
                 <field name="mcp_bearer_token" type="password" label="COM_MCPSERVER_CONFIG_MCP_BEARER_TOKEN_LABEL" description="COM_MCPSERVER_CONFIG_MCP_BEARER_TOKEN_DESC" filter="raw" maxlength="150"/>
                 <field name="ip_allow_list" type="textarea" label="COM_MCPSERVER_CONFIG_IP_ALLOW_LIST" description="COM_MCPSERVER_CONFIG_IP_ALLOW_LIST_DESC" rows="3" />
                 <field name="allowed_origins" type="textarea" label="COM_MCPSERVER_CONFIG_ALLOWED_ORIGINS" description="COM_MCPSERVER_CONFIG_ALLOWED_ORIGINS_DESC" rows="3" />
-                <field name="rate_limit_requests" type="integer" label="COM_MCPSERVER_CONFIG_RATE_LIMIT_REQUESTS" default="60" description="COM_MCPSERVER_CONFIG_RATE_LIMIT_REQUESTS_DESC" />
-                <field name="rate_limit_window" type="integer" label="COM_MCPSERVER_CONFIG_RATE_LIMIT_WINDOW" default="60" description="COM_MCPSERVER_CONFIG_RATE_LIMIT_WINDOW_DESC" />
+                <field name="rate_limit_requests" type="number" label="COM_MCPSERVER_CONFIG_RATE_LIMIT_REQUESTS" default="60" description="COM_MCPSERVER_CONFIG_RATE_LIMIT_REQUESTS_DESC" min="1" max="10000" step="1" />
+                <field name="rate_limit_window" type="number" label="COM_MCPSERVER_CONFIG_RATE_LIMIT_WINDOW" default="60" description="COM_MCPSERVER_CONFIG_RATE_LIMIT_WINDOW_DESC" min="1" max="86400" step="1" />
                 <field name="trusted_proxies" type="textarea" label="COM_MCPSERVER_CONFIG_TRUSTED_PROXIES" description="COM_MCPSERVER_CONFIG_TRUSTED_PROXIES_DESC" rows="2" />
                 <field name="read_only" type="radio" label="COM_MCPSERVER_CONFIG_READ_ONLY" description="COM_MCPSERVER_CONFIG_READ_ONLY_DESC" default="0" class="btn-group">
                     <option value="0">JNO</option>
                     <option value="1">JYES</option>
                 </field>
                 <field name="disabled_tools" type="textarea" label="COM_MCPSERVER_CONFIG_DISABLED_TOOLS" description="COM_MCPSERVER_CONFIG_DISABLED_TOOLS_DESC" rows="4" filter="raw" default="install_extension, uninstall_extension, update_template_file" />
+                <field name="governed_mode" type="radio" label="COM_MCPSERVER_CONFIG_GOVERNED_MODE" description="COM_MCPSERVER_CONFIG_GOVERNED_MODE_DESC" default="0" class="btn-group">
+                    <option value="0">JNO</option>
+                    <option value="1">JYES</option>
+                </field>
+                <field name="credential_salt" type="hidden" default="" />
             </fieldset>
             <fieldset name="monitoring" label="COM_MCPSERVER_CONFIG_FIELDSET_MONITORING">
                 <field name="metrics_enabled" type="radio" label="COM_MCPSERVER_CONFIG_METRICS_ENABLED" description="COM_MCPSERVER_CONFIG_METRICS_ENABLED_DESC" default="1" class="btn-group">
                     <option value="0">JNO</option>
                     <option value="1">JYES</option>
                 </field>
-                <field name="metrics_retention_days" type="integer" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="30" min="1" max="365" />
+                <field name="metrics_retention_days" type="number" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="360" min="1" max="3650" step="1" />
             </fieldset>
         </fields>
     </config>

@@ -37,7 +37,7 @@ class PolicyService
     {
     }
 
-    public function isToolAllowed(string $toolName, ?int $userId = null): bool
+    public function isToolAllowed(string $toolName): bool
     {
         return !in_array($toolName, $this->getDisabledTools(), true);
     }

@@ -28,7 +28,7 @@
             <option value="0">JNO</option>
             <option value="1">JYES</option>
         </field>
-        <field name="disabled_tools" type="textarea" label="COM_MCPSERVER_CONFIG_DISABLED_TOOLS" description="COM_MCPSERVER_CONFIG_DISABLED_TOOLS_DESC" rows="4" filter="raw" default="install_extension, uninstall_extension, update_template_file" />
+        <field name="disabled_tools" type="textarea" label="COM_MCPSERVER_CONFIG_DISABLED_TOOLS" description="COM_MCPSERVER_CONFIG_DISABLED_TOOLS_DESC" rows="4" filter="raw" default="install_extension, uninstall_extension, update_template_file, list_field_groups, get_field_group, create_field_group, update_field_group, delete_field_group, reorder_field_groups, list_fields, get_field, find_field_by_name, create_field, update_field, delete_field, reorder_fields, get_item_field_values, set_item_field_values" />
         <field name="governed_mode" type="radio" label="COM_MCPSERVER_CONFIG_GOVERNED_MODE" description="COM_MCPSERVER_CONFIG_GOVERNED_MODE_DESC" default="0" class="btn-group">
             <option value="0">JNO</option>
             <option value="1">JYES</option>

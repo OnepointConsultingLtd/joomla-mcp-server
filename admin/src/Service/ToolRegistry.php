@@ -14,6 +14,9 @@ defined('_JEXEC') or die;
 
 class ToolRegistry
 {
+    /** Repeated verbatim by every com_fields tool schema; the six contexts core Joomla declares. */
+    private const FIELD_CONTEXT_DESCRIPTION = 'Joomla custom field context. One of: com_content.article, com_content.categories, com_contact.contact, com_contact.mail, com_contact.categories, com_users.user';
+
     private array $tools = [];
     private array $executors = [];
 
@@ -1801,6 +1804,374 @@ class ToolRegistry
             'annotations' => [
                 'title' => 'Check Internal Links',
                 'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'list_field_groups',
+            'description' => 'List custom field groups (the tabs that custom fields are organised into) for a Joomla field context. Call this before create_field or update_field to discover valid group_id values.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'state' => ['type' => 'integer', 'enum' => [-2, 0, 1, 2], 'description' => 'Filter by state (1 published, 0 unpublished, 2 archived, -2 trashed)'],
+                    'limit' => ['type' => 'integer', 'description' => 'Results limit (use with offset to page; check pagination.has_more and pagination.next_offset in the response)'],
+                    'offset' => ['type' => 'integer', 'description' => 'Results offset (set to pagination.next_offset when pagination.has_more is true)'],
+                ],
+                'required' => ['context'],
+            ],
+            'annotations' => [
+                'title' => 'List Field Groups',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'get_field_group',
+            'description' => 'Get a single custom field group by ID, including its params and view access level. Per-group permission rules are not exposed by Joomla\'s Web Services API, so they can be neither read nor changed through this server.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field group ID'],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Get Field Group',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'create_field_group',
+            'description' => 'Create a custom field group (a tab) in a Joomla field context.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'title' => ['type' => 'string', 'description' => 'Field group title, shown as the tab label'],
+                    'description' => ['type' => 'string', 'description' => 'Field group description (HTML)'],
+                    'note' => ['type' => 'string', 'description' => 'Admin note'],
+                    'state' => ['type' => 'integer', 'enum' => [0, 1], 'default' => 1, 'description' => 'Published state (1 published, 0 unpublished)'],
+                    'access' => ['type' => 'integer', 'default' => 1, 'description' => 'View access level ID'],
+                    'language' => ['type' => 'string', 'default' => '*', 'description' => 'Language code or "*" for all'],
+                    'params' => ['type' => 'object', 'description' => 'Field group parameters', 'additionalProperties' => true],
+                ],
+                'required' => ['context', 'title'],
+            ],
+            'annotations' => [
+                'title' => 'Create Field Group',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => false,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'update_field_group',
+            'description' => 'Update a custom field group. Only the fields you supply are changed; "params" is merged into the existing params (send only the keys you want to change). Permission rules are never touched. Call get_field_group first to inspect the current values.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field group ID'],
+                    'title' => ['type' => 'string', 'description' => 'Field group title'],
+                    'description' => ['type' => 'string', 'description' => 'Field group description (HTML)'],
+                    'note' => ['type' => 'string', 'description' => 'Admin note'],
+                    'state' => ['type' => 'integer', 'enum' => [-2, 0, 1, 2], 'description' => 'State (1 published, 0 unpublished, 2 archived, -2 trashed)'],
+                    'access' => ['type' => 'integer', 'description' => 'View access level ID'],
+                    'language' => ['type' => 'string', 'description' => 'Language code or "*" for all'],
+                    'ordering' => ['type' => 'integer', 'description' => 'Sort order within the context'],
+                    'params' => ['type' => 'object', 'description' => 'Field group parameters, merged into the existing params. Send only the keys to change.', 'additionalProperties' => true],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Update Field Group',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'delete_field_group',
+            'description' => 'Delete a custom field group. Joomla requires field groups to be trashed before deletion, so this tool trashes the group first when needed, then deletes it permanently. Fields assigned to the group are not deleted; move them to another group with update_field beforehand.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field group ID'],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Delete Field Group',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'reorder_field_groups',
+            'description' => 'Reorder custom field groups (tabs) within a context. Supply every group ID in the order you want; each is assigned an ordering of 1..N. IDs are validated against the context before anything is written.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'ordered_ids' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'integer'],
+                        'description' => 'Field group IDs in the desired order',
+                    ],
+                ],
+                'required' => ['context', 'ordered_ids'],
+            ],
+            'annotations' => [
+                'title' => 'Reorder Field Groups',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'list_fields',
+            'description' => 'List custom fields defined for a Joomla field context. Use this to discover which fields exist, their technical names and their IDs.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'group_id' => ['type' => 'integer', 'description' => 'Only fields in this field group'],
+                    'state' => ['type' => 'integer', 'enum' => [-2, 0, 1, 2], 'description' => 'Filter by state (1 published, 0 unpublished, 2 archived, -2 trashed)'],
+                    'search' => ['type' => 'string', 'description' => 'Partial match against title, technical name or admin note'],
+                    'limit' => ['type' => 'integer', 'description' => 'Results limit (use with offset to page; check pagination.has_more and pagination.next_offset in the response)'],
+                    'offset' => ['type' => 'integer', 'description' => 'Results offset (set to pagination.next_offset when pagination.has_more is true)'],
+                ],
+                'required' => ['context'],
+            ],
+            'annotations' => [
+                'title' => 'List Fields',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'get_field',
+            'description' => 'Get a single custom field by ID. Returns the full definition plus an "options" array giving each selectable option as a separate stored "value" and human-readable "label" (list, radio and checkboxes fields store only the value; the label is editable in the admin and is not the value). The raw "fieldparams" are returned unchanged alongside it. Per-field permission rules are not exposed by Joomla\'s Web Services API, so they can be neither read nor changed through this server.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field ID'],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Get Field',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'find_field_by_name',
+            'description' => 'Resolve a custom field\'s technical name to its full definition within a context. Use this instead of guessing IDs when you know a field\'s name. Matching is exact and case-insensitive; use list_fields with "search" for partial matches.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'name' => ['type' => 'string', 'description' => 'The field\'s technical name (its alias, not its title or label)'],
+                ],
+                'required' => ['context', 'name'],
+            ],
+            'annotations' => [
+                'title' => 'Find Field By Name',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'create_field',
+            'description' => 'Create a custom field in a Joomla field context. "type" must match an installed field plugin; the core types are calendar, checkboxes, color, editor, imagelist, integer, list, media, radio, sql, subform, text, textarea, url, user and usergrouplist. Type-specific settings go in "fieldparams" — for list, radio and checkboxes that means fieldparams.options, where each option carries a stored "value" and a displayed "name".',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'title' => ['type' => 'string', 'description' => 'Field title, shown in the admin list'],
+                    'type' => ['type' => 'string', 'default' => 'text', 'description' => 'Field type (see the tool description for the core types)'],
+                    'name' => ['type' => 'string', 'description' => 'Technical name; generated from the title when omitted'],
+                    'label' => ['type' => 'string', 'description' => 'Label shown on the edit form; defaults to the title'],
+                    'group_id' => ['type' => 'integer', 'description' => 'Field group (tab) ID; 0 for no group'],
+                    'description' => ['type' => 'string', 'description' => 'Field description (HTML)'],
+                    'note' => ['type' => 'string', 'description' => 'Admin note'],
+                    'default_value' => ['type' => 'string', 'description' => 'Default value applied to new items'],
+                    'required' => ['type' => 'integer', 'enum' => [0, 1], 'default' => 0, 'description' => 'Whether the field must be filled in'],
+                    'only_use_in_subform' => ['type' => 'integer', 'enum' => [0, 1], 'description' => 'Restrict the field to use inside a subform field'],
+                    'state' => ['type' => 'integer', 'enum' => [0, 1], 'default' => 1, 'description' => 'Published state (1 published, 0 unpublished)'],
+                    'access' => ['type' => 'integer', 'default' => 1, 'description' => 'View access level ID'],
+                    'language' => ['type' => 'string', 'default' => '*', 'description' => 'Language code or "*" for all'],
+                    'ordering' => ['type' => 'integer', 'description' => 'Sort order within the context'],
+                    'assigned_cat_ids' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'integer'],
+                        'description' => 'Category IDs the field applies to. Omit or send [0] for all categories; send [-1] for none. Only meaningful for contexts that have categories.',
+                    ],
+                    'params' => ['type' => 'object', 'description' => 'Display and form parameters (showlabel, render_class, display, showon, ...)', 'additionalProperties' => true],
+                    'fieldparams' => ['type' => 'object', 'description' => 'Type-specific settings, e.g. options for list/radio/checkboxes', 'additionalProperties' => true],
+                ],
+                'required' => ['context', 'title'],
+            ],
+            'annotations' => [
+                'title' => 'Create Field',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => false,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'update_field',
+            'description' => 'Update a custom field. Only the fields you supply are changed. "params" and "fieldparams" are each merged into the existing values, so send only the keys you want to change. Category assignments are preserved when "assigned_cat_ids" is omitted, and permission rules are never touched. WARNING: replacing fieldparams.options on a list, radio or checkboxes field makes Joomla delete every stored value that is no longer one of the options. Call get_field first to inspect the current definition.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field ID'],
+                    'title' => ['type' => 'string', 'description' => 'Field title'],
+                    'type' => ['type' => 'string', 'description' => 'Field type (see create_field for the core types)'],
+                    'name' => ['type' => 'string', 'description' => 'Technical name'],
+                    'label' => ['type' => 'string', 'description' => 'Label shown on the edit form'],
+                    'group_id' => ['type' => 'integer', 'description' => 'Field group (tab) ID; 0 for no group'],
+                    'description' => ['type' => 'string', 'description' => 'Field description (HTML)'],
+                    'note' => ['type' => 'string', 'description' => 'Admin note'],
+                    'default_value' => ['type' => 'string', 'description' => 'Default value applied to new items'],
+                    'required' => ['type' => 'integer', 'enum' => [0, 1], 'description' => 'Whether the field must be filled in'],
+                    'only_use_in_subform' => ['type' => 'integer', 'enum' => [0, 1], 'description' => 'Restrict the field to use inside a subform field'],
+                    'state' => ['type' => 'integer', 'enum' => [-2, 0, 1, 2], 'description' => 'State (1 published, 0 unpublished, 2 archived, -2 trashed)'],
+                    'access' => ['type' => 'integer', 'description' => 'View access level ID'],
+                    'language' => ['type' => 'string', 'description' => 'Language code or "*" for all'],
+                    'ordering' => ['type' => 'integer', 'description' => 'Sort order within the context'],
+                    'assigned_cat_ids' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'integer'],
+                        'description' => 'Category IDs the field applies to. Left unchanged when omitted. Send [0] for all categories, [-1] for none.',
+                    ],
+                    'params' => ['type' => 'object', 'description' => 'Display and form parameters, merged into the existing params. Send only the keys to change.', 'additionalProperties' => true],
+                    'fieldparams' => ['type' => 'object', 'description' => 'Type-specific settings, merged into the existing fieldparams. Send only the keys to change; a supplied "options" replaces the whole option list.', 'additionalProperties' => true],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Update Field',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'delete_field',
+            'description' => 'Delete a custom field, every value stored for it and its category assignments. Joomla requires fields to be trashed before deletion, so this tool trashes the field first when needed, then deletes it permanently.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'id' => ['type' => 'integer', 'description' => 'Field ID'],
+                ],
+                'required' => ['context', 'id'],
+            ],
+            'annotations' => [
+                'title' => 'Delete Field',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'reorder_fields',
+            'description' => 'Reorder custom fields within a context. Supply every field ID in the order you want; each is assigned an ordering of 1..N. IDs are validated against the context before anything is written.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => self::FIELD_CONTEXT_DESCRIPTION],
+                    'ordered_ids' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'integer'],
+                        'description' => 'Field IDs in the desired order',
+                    ],
+                ],
+                'required' => ['context', 'ordered_ids'],
+            ],
+            'annotations' => [
+                'title' => 'Reorder Fields',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'get_item_field_values',
+            'description' => 'Read the custom field values stored on one item (an article, category, contact or user). Each entry reports the field\'s technical name and label, the "raw_value" actually stored, and the "display_value" that value resolves to — for list, radio and checkboxes fields these differ, because only the value is stored. Not available for com_contact.mail, which has no stored items.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => 'Field context of the item. One of: com_content.article, com_content.categories, com_contact.contact, com_users.user'],
+                    'item_id' => ['type' => 'integer', 'description' => 'ID of the article, category, contact or user'],
+                ],
+                'required' => ['context', 'item_id'],
+            ],
+            'annotations' => [
+                'title' => 'Get Item Field Values',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'set_item_field_values',
+            'description' => 'Set custom field values on one item (an article, contact or user). "values" is keyed by each field\'s technical name — use find_field_by_name or list_fields to resolve names first; unknown names are rejected rather than silently ignored. Fields you do not mention keep their current values. For list, radio and checkboxes fields send the stored option value, not its label. Sending an empty string or empty array clears that field\'s value. Joomla\'s Web Services API cannot write field values for com_content.categories or com_contact.mail, so those contexts are rejected.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'context' => ['type' => 'string', 'description' => 'Field context of the item. One of: com_content.article, com_contact.contact, com_users.user'],
+                    'item_id' => ['type' => 'integer', 'description' => 'ID of the article, contact or user'],
+                    'values' => [
+                        'type' => 'object',
+                        'description' => 'Field values keyed by the field\'s technical name',
+                        'additionalProperties' => true,
+                    ],
+                ],
+                'required' => ['context', 'item_id', 'values'],
+            ],
+            'annotations' => [
+                'title' => 'Set Item Field Values',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
                 'idempotentHint' => true,
                 'openWorldHint' => true,
             ],

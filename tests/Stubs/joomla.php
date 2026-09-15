@@ -43,6 +43,14 @@ namespace Joomla\CMS {
             self::$dbo = null;
         }
     }
+
+    class Version
+    {
+        public function getShortVersion(): string
+        {
+            return '5.2.0';
+        }
+    }
 }
 
 namespace Joomla\CMS\Date {
@@ -400,6 +408,16 @@ namespace Joomla\Registry {
 }
 
 namespace Joomla\Database {
+    /**
+     * Declared methods bind every test double, so the interface stays at what the
+     * doubles actually build; the rest of the real query builder is documented so
+     * static analysis still resolves the clauses the component chains.
+     *
+     * @method self delete(?string $table = null)
+     * @method self join(string $type, string $table, ?string $condition = null)
+     * @method self order(array|string $columns)
+     * @method self group(array|string $columns)
+     */
     interface QueryInterface
     {
         public function select(array|string $columns): self;
@@ -421,6 +439,17 @@ namespace Joomla\Database {
         public function __toString(): string;
     }
 
+    /**
+     * The real driver carries the whole load* family, but each method declared here
+     * has to be implemented by every test double, so only the ones a double actually
+     * needs are required. The rest are documented so static analysis still resolves
+     * the calls the component makes against this type.
+     *
+     * @method array       loadColumn(int $offset = 0)
+     * @method object|null loadObject(string $class = \stdClass::class)
+     * @method array|null  loadAssocList(?string $key = null, ?string $column = null)
+     * @method array|null  loadObjectList(string $key = '', string $class = \stdClass::class)
+     */
     interface DatabaseInterface
     {
         public function quoteName(array|string $name, array|string|null $alias = null): array|string;
@@ -469,6 +498,51 @@ namespace Joomla\CMS\Installer {
     if (!class_exists(InstallerAdapter::class)) {
         class InstallerAdapter
         {
+        }
+    }
+
+    /**
+     * The install/uninstall executors drive Joomla's real installer, which needs a booted
+     * CMS and a writable filesystem. These stand-ins exist so the classes resolve; they
+     * throw rather than fake a result, so a test that reaches them fails loudly instead of
+     * reporting an install that never happened. Parameters stay loose because the real
+     * methods are untyped and the executors pass values straight out of the package array.
+     */
+    if (!class_exists(InstallerHelper::class)) {
+        class InstallerHelper
+        {
+            public static function unpack(mixed $packageFilename, bool $alwaysReturnArray = false): array|bool
+            {
+                throw new \RuntimeException('InstallerHelper::unpack() needs a booted Joomla');
+            }
+
+            public static function cleanupInstall(mixed $package, mixed $resultdir): bool
+            {
+                throw new \RuntimeException('InstallerHelper::cleanupInstall() needs a booted Joomla');
+            }
+        }
+    }
+
+    if (!class_exists(Installer::class)) {
+        class Installer
+        {
+            /** Set by install(); the executor reports the extension name from it. */
+            public ?\SimpleXMLElement $manifest = null;
+
+            public static function getInstance(): self
+            {
+                throw new \RuntimeException('Installer::getInstance() needs a booted Joomla');
+            }
+
+            public function install(mixed $path = null): bool
+            {
+                throw new \RuntimeException('Installer::install() needs a booted Joomla');
+            }
+
+            public function uninstall(mixed $type, mixed $identifier): bool
+            {
+                throw new \RuntimeException('Installer::uninstall() needs a booted Joomla');
+            }
         }
     }
 }

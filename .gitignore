@@ -30,3 +30,6 @@ __pycache__/
 .claude/
 CLAUDE.md
 .cursor/
+
+# Graphify
+graphify-out/

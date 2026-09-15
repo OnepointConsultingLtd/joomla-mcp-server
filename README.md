@@ -2,7 +2,7 @@
 
 A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server over HTTP JSON-RPC. It lets MCP clients such as Claude Desktop and Cursor work with Joomla content through the site's own Joomla Web Services API.
 
-**Version:** 1.8.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
+**Version:** 1.9.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
 
 ## Features
 
@@ -18,7 +18,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 71 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 86 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -155,7 +155,7 @@ Article versioning tools require Joomla article versioning to be enabled.
 | `install_extension` | Install a Joomla extension from a base64 zip or a download URL (arbitrary code execution — restrict to trusted callers) |
 | `uninstall_extension` | Uninstall an extension by `extension_id` (protected/locked core extensions are refused) |
 
-`install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in.
+`install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in. The custom field tools are disabled by default too, for a different reason — see below.
 
 ### Multilingual associations
 
@@ -182,9 +182,45 @@ Article versioning tools require Joomla article versioning to be enabled.
 
 `get_rendered_page` fetches the public site as an anonymous visitor so the result matches what a guest actually sees after the template and content plugins run. `check_internal_links` never issues HTTP requests for external URLs. `seo_audit_articles` does not inspect `metakey` — Joomla stopped using keyword meta tags in 2009.
 
+### Custom fields
+
+| Tool | Description |
+|---|---|
+| `list_fields` | List the custom fields defined for a field context, optionally filtered by group, state or a name/title search |
+| `get_field` | Get one field, with its selectable options split into the stored `value` and the displayed `label` |
+| `find_field_by_name` | Resolve a field's technical name to its full definition, so an ID never has to be guessed |
+| `create_field` | Create a custom field, including its type-specific `fieldparams` |
+| `update_field` | Update a field; `params` and `fieldparams` are merged, and category assignments are preserved |
+| `delete_field` | Delete a field and every value stored for it (trashes it first when needed) |
+| `reorder_fields` | Set the order of the fields in a context in one call |
+
+### Custom field groups
+
+| Tool | Description |
+|---|---|
+| `list_field_groups` | List the field groups (tabs) defined for a field context |
+| `get_field_group` | Get one field group by ID |
+| `create_field_group` | Create a field group |
+| `update_field_group` | Update a field group; `params` is merged into the existing params |
+| `delete_field_group` | Delete a field group (trashes it first when needed) |
+| `reorder_field_groups` | Set the order of the tabs in a context in one call |
+
+### Custom field values
+
+| Tool | Description |
+|---|---|
+| `get_item_field_values` | Read the field values stored on one article, category, contact or user, reporting the raw stored value and its resolved label separately |
+| `set_item_field_values` | Set field values on one article, contact or user, keyed by each field's technical name |
+
+The field tools accept the six contexts core Joomla declares: `com_content.article`, `com_content.categories`, `com_contact.contact`, `com_contact.mail`, `com_contact.categories` and `com_users.user`. Third-party contexts are not supported, because core registers the `com_fields` Web Services routes from inside `plg_webservices_content`, `_contact` and `_users` rather than from a plugin of its own — a 404 from a field tool usually means one of those plugins is disabled.
+
+All 15 field tools are **disabled by default**, for a different reason than the code-execution tools above: they change the site's content schema rather than its content, and deleting a field destroys every value stored against it. Remove the ones you want from the Disabled Tools list in the component options; the read-only tools can be enabled on their own.
+
+Two Joomla behaviours are worth knowing before using them. `update_field` merges `params` and `fieldparams` rather than replacing them, and always resends category assignments, because Joomla's PATCH handler would otherwise discard both. Replacing `fieldparams.options` on a `list`, `radio` or `checkboxes` field makes Joomla delete every stored value that is no longer one of the options. Per-field permission rules are not exposed by Joomla's Web Services API, so these tools can neither read nor change them; the view access level (`access`) is fully supported.
+
 ### Not covered (by design)
 
-User management, Joomla global configuration, custom fields (com_fields), contacts, banners and redirects are deliberately not exposed as tools. User accounts and global configuration in particular would widen the blast radius of a leaked bearer token well beyond content management. If your workflow needs one of these domains, open an issue — they are candidates for opt-in tools in a future release.
+User management, Joomla global configuration, contacts, banners and redirects are deliberately not exposed as tools. User accounts and global configuration in particular would widen the blast radius of a leaked bearer token well beyond content management. If your workflow needs one of these domains, open an issue — they are candidates for opt-in tools in a future release.
 
 ## MCP Resources
 

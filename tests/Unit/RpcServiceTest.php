@@ -74,7 +74,7 @@ class RpcServiceTest extends TestCase
         $registered = array_column($registry->getAll(), 'name');
 
         $this->assertSame($registered, $listed);
-        $this->assertCount(86, $listed);
+        $this->assertCount(88, $listed);
     }
 
     public function testSiteHealthReturnsOkAndJoomlaVersion(): void

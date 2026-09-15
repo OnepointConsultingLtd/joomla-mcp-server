@@ -1594,6 +1594,85 @@ class ToolRegistry
         ]);
 
         $this->register([
+            'name' => 'get_extension_params',
+            'description' => 'Read the saved Options of an installed extension — the settings an administrator edits on the extension\'s Options screen, stored in `#__extensions.params`. '
+                . 'Identify the extension by extension_id (from list_extensions) or by element plus type (plus folder for a plugin, plus client where the same element exists for both site and administrator). '
+                . 'Also returns option_definitions: the options the extension\'s own manifest declares (name, type, label language key, default, list options), which is how you discover the key names to send to update_extension_params — '
+                . 'an extension whose Options have never been saved stores an empty params object even though its manifest declares defaults, so an empty "params" does not mean the extension has no options. '
+                . 'Values of manifest fields of type "password" are masked and listed in redacted_keys. '
+                . 'Module and template *instances* keep their own separate params: use get_module_by_id or get_template_style for those. This server\'s own component (com_mcpserver) cannot be read here.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'extension_id' => ['type' => 'integer', 'description' => 'Extension ID (from list_extensions). Takes precedence over element/type/folder/client.'],
+                    'element' => ['type' => 'string', 'description' => 'Extension element, e.g. "com_content", "mod_articles_news" or a plugin element such as "webservices"'],
+                    'type' => [
+                        'type' => 'string',
+                        'enum' => ['component', 'module', 'plugin', 'template', 'language', 'library', 'package', 'file'],
+                        'description' => 'Extension type; required when looking up by element',
+                    ],
+                    'folder' => ['type' => 'string', 'description' => 'Plugin group folder (e.g. "system", "content"); required when two plugin groups share an element'],
+                    'client' => [
+                        'type' => 'string',
+                        'enum' => ['site', 'administrator'],
+                        'description' => 'Client to look the element up in; omit unless the same element is installed for both',
+                    ],
+                    'include_definitions' => [
+                        'type' => 'boolean',
+                        'default' => true,
+                        'description' => 'Include option_definitions read from the extension manifest. Set false for a smaller response once the key names are known.',
+                    ],
+                ],
+            ],
+            'annotations' => [
+                'title' => 'Get Extension Params',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'update_extension_params',
+            'description' => 'Update the saved Options of an installed extension, merging into what is already stored: only the keys you send change and every other key is left as it was. '
+                . 'Send null as a value to remove a key. Joomla\'s Web Services API ignores params on an extension write, so this writes `#__extensions.params` directly, exactly as the Options screen does. '
+                . 'Identify the extension the same way as get_extension_params. Call that tool first to learn the key names — a key the manifest does not declare is still written, and reported back in unknown_keys, so a typo is visible rather than silent. '
+                . 'A nested object is replaced wholesale rather than deep-merged, so changing one nested key means sending that whole nested object. '
+                . 'Module and template *instances* keep their own separate params: use update_module or update_template_style for those. This server\'s own component (com_mcpserver) cannot be written here.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'extension_id' => ['type' => 'integer', 'description' => 'Extension ID (from list_extensions). Takes precedence over element/type/folder/client.'],
+                    'element' => ['type' => 'string', 'description' => 'Extension element, e.g. "com_content", "mod_articles_news" or a plugin element such as "webservices"'],
+                    'type' => [
+                        'type' => 'string',
+                        'enum' => ['component', 'module', 'plugin', 'template', 'language', 'library', 'package', 'file'],
+                        'description' => 'Extension type; required when looking up by element',
+                    ],
+                    'folder' => ['type' => 'string', 'description' => 'Plugin group folder (e.g. "system", "content"); required when two plugin groups share an element'],
+                    'client' => [
+                        'type' => 'string',
+                        'enum' => ['site', 'administrator'],
+                        'description' => 'Client to look the element up in; omit unless the same element is installed for both',
+                    ],
+                    'params' => [
+                        'type' => 'object',
+                        'description' => 'Options to merge into the stored params. Send only the keys to change; a null value removes that key.',
+                        'additionalProperties' => true,
+                    ],
+                ],
+                'required' => ['params'],
+            ],
+            'annotations' => [
+                'title' => 'Update Extension Params',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
             'name' => 'uninstall_extension',
             'description' => 'Uninstall a Joomla extension by extension_id. Protected and locked core extensions cannot be uninstalled. WARNING: this permanently removes the extension and runs its uninstall scripts — only allow trusted callers.',
             'inputSchema' => [

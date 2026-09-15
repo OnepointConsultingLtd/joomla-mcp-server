@@ -40,6 +40,17 @@ class RpcService
      */
     private const PROTECTED_CACHE_GROUPS = ['mcp_sse', 'com_mcpserver_ratelimit'];
 
+    /**
+     * The one element whose Options the params tools refuse to touch: this
+     * component's own. Reading them would hand the caller the MCP bearer token and
+     * the Joomla API token; writing them would let a tool call switch off read-only
+     * mode, empty the disabled-tools list or disable authentication — the policy
+     * layer that gates this very tool. Both belong in the administrator.
+     */
+    private const EXTENSION_PARAMS_SELF_ELEMENT = 'com_mcpserver';
+
+    private const EXTENSION_PARAMS_REDACTION = '********';
+
     private const SEO_METADESC_MIN = 50;
 
     private const SEO_METADESC_MAX = 160;
@@ -176,6 +187,8 @@ class RpcService
             'delete_tag'                    => fn(array $p) => $this->deleteTag($p),
             'list_extensions'               => fn(array $p) => $this->listExtensions($p),
             'set_extension_state'           => fn(array $p) => $this->setExtensionState($p),
+            'get_extension_params'          => fn(array $p) => $this->getExtensionParams($p),
+            'update_extension_params'       => fn(array $p) => $this->updateExtensionParams($p),
             'uninstall_extension'           => fn(array $p) => $this->uninstallExtension($p),
             'create_menu'                   => fn(array $p) => $this->createMenu($p),
             'delete_menu_item'              => fn(array $p) => $this->deleteMenuItem($p),
@@ -3218,6 +3231,438 @@ class RpcService
         ];
     }
 
+    private function getExtensionParams(array $params): array
+    {
+        $includeDefinitions = !array_key_exists('include_definitions', $params)
+            || (bool) $params['include_definitions'];
+
+        return $this->cache->remember(
+            'extension_params:' . $this->extensionLocatorKey($params) . ':' . ($includeDefinitions ? 'defs' : 'bare'),
+            function () use ($params, $includeDefinitions) {
+                $row = $this->resolveExtensionForParams($params);
+                $manifest = $this->extensionManifestPath($row);
+                // Read the definitions even when they are not being returned: they
+                // are what identifies a password field, and a secret must not become
+                // readable just because the caller asked for a smaller response.
+                $definitions = $manifest === null ? [] : $this->readExtensionOptionDefinitions($manifest);
+
+                [$values, $redacted] = $this->redactSecretParams(
+                    $this->decodeExtensionParams($row['params'] ?? null),
+                    $definitions
+                );
+
+                $data = $this->describeExtension($row) + [
+                    'params'        => (object) $values,
+                    'redacted_keys' => $redacted,
+                ];
+
+                if ($includeDefinitions) {
+                    $data['manifest_path'] = $manifest === null ? null : $this->pathRelativeToRoot($manifest);
+                    $data['option_definitions'] = $definitions;
+                }
+
+                return ['data' => $data];
+            }
+        );
+    }
+
+    /**
+     * Joomla's Web Services API drops `params` on an extension write — the extension
+     * controllers never map the column — so the Options an administrator edits can
+     * only be changed here or in the backend. This merges into the stored JSON rather
+     * than replacing it, matching update_module: an extension's params column holds
+     * every option it has, and a caller that means to change one setting would
+     * otherwise silently reset the rest to whatever it did not send.
+     */
+    private function updateExtensionParams(array $params): array
+    {
+        $supplied = $params['params'] ?? null;
+        if (!is_array($supplied) || $supplied === []) {
+            throw new \InvalidArgumentException('params must be an object holding at least one option to change');
+        }
+
+        $row = $this->resolveExtensionForParams($params);
+        $merged = $this->decodeExtensionParams($row['params'] ?? null);
+
+        $changed = [];
+        $removed = [];
+        foreach ($supplied as $key => $value) {
+            $key = (string) $key;
+
+            // A null value removes the option rather than storing a null: Joomla's
+            // own Options screen has no way to write one, so a stored null would be
+            // a value no backend save could ever produce.
+            if ($value === null) {
+                if (array_key_exists($key, $merged)) {
+                    unset($merged[$key]);
+                    $removed[] = $key;
+                }
+
+                continue;
+            }
+
+            $merged[$key] = $value;
+            $changed[] = $key;
+        }
+
+        $manifest = $this->extensionManifestPath($row);
+        $definitions = $manifest === null ? [] : $this->readExtensionOptionDefinitions($manifest);
+        // Reported, not rejected: plenty of extensions keep options their manifest
+        // never declares (subform rows, values written by their own install script),
+        // so an undeclared key is a typo worth surfacing rather than an error. With
+        // no manifest on disk there is nothing to compare against, so nothing is
+        // claimed to be unknown.
+        $declared = array_column($definitions, 'name');
+        $unknown = $declared === []
+            ? []
+            : array_values(array_diff(array_merge($changed, $removed), $declared));
+
+        $update = new \stdClass();
+        $update->extension_id = (int) $row['extension_id'];
+        // An emptied params column is stored as {} the way Joomla stores it;
+        // json_encode would write [] for an empty PHP array.
+        $update->params = $merged === [] ? '{}' : (string) json_encode($merged, JSON_THROW_ON_ERROR);
+
+        Factory::getDbo()->updateObject('#__extensions', $update, 'extension_id');
+
+        $this->invalidateExtensionCaches((string) $row['type']);
+
+        [$values, $redacted] = $this->redactSecretParams($merged, $definitions);
+
+        return [
+            'data' => $this->describeExtension($row) + [
+                'params'        => (object) $values,
+                'changed_keys'  => $changed,
+                'removed_keys'  => $removed,
+                'unknown_keys'  => $unknown,
+                'redacted_keys' => $redacted,
+            ],
+        ];
+    }
+
+    /**
+     * @param   array<string, mixed>  $params
+     *
+     * @return  array<string, mixed>  The #__extensions row, params column included.
+     */
+    private function resolveExtensionForParams(array $params): array
+    {
+        $extensionId = (int) ($params['extension_id'] ?? 0);
+        $row = $extensionId > 0
+            ? $this->loadExtensionRow($extensionId)
+            : $this->loadExtensionRowByElement($params);
+
+        if (strtolower((string) $row['element']) === self::EXTENSION_PARAMS_SELF_ELEMENT) {
+            throw new \InvalidArgumentException(
+                'The MCP server component\'s own options hold its authentication tokens and the policy that gates '
+                . 'this tool; read and change them in the Joomla administrator'
+            );
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param   array<string, mixed>  $params
+     *
+     * @return  array<string, mixed>
+     */
+    private function loadExtensionRowByElement(array $params): array
+    {
+        $element = trim((string) ($params['element'] ?? ''));
+        $type = trim((string) ($params['type'] ?? ''));
+
+        if ($element === '' || $type === '') {
+            throw new \InvalidArgumentException('Supply extension_id, or both element and type');
+        }
+
+        $db = Factory::getDbo();
+        $query = $db->getQuery(true)
+            ->select($db->quoteName([
+                'extension_id', 'name', 'type', 'element', 'folder',
+                'client_id', 'enabled', 'protected', 'locked', 'params',
+            ]))
+            ->from($db->quoteName('#__extensions'))
+            ->where($db->quoteName('element') . ' = ' . $db->quote($element))
+            ->where($db->quoteName('type') . ' = ' . $db->quote($type));
+
+        $folder = trim((string) ($params['folder'] ?? ''));
+        if ($folder !== '') {
+            $query->where($db->quoteName('folder') . ' = ' . $db->quote($folder));
+        }
+
+        $client = (string) ($params['client'] ?? '');
+        if ($client !== '') {
+            $query->where($db->quoteName('client_id') . ' = ' . ($client === 'administrator' ? 1 : 0));
+        }
+
+        $rows = $db->setQuery($query)->loadAssocList() ?: [];
+
+        if ($rows === []) {
+            throw new \InvalidArgumentException(
+                'No ' . $type . ' extension is installed with element ' . $element . ' — check list_extensions'
+            );
+        }
+
+        // Element alone is not unique: a plugin element repeats across groups
+        // (system/content/…) and a template or module can be installed for both
+        // clients. Naming the candidates is more useful than picking one.
+        if (count($rows) > 1) {
+            $candidates = array_map(
+                fn (array $candidate): string => '#' . (int) $candidate['extension_id']
+                    . ' (' . ((string) $candidate['folder'] !== '' ? 'folder ' . $candidate['folder'] . ', ' : '')
+                    . ((int) $candidate['client_id'] === 1 ? 'administrator' : 'site') . ')',
+                $rows
+            );
+
+            throw new \InvalidArgumentException(
+                'element ' . $element . ' matches ' . count($rows) . ' installed extensions: '
+                . implode(', ', $candidates) . '. Narrow it with folder/client, or pass extension_id.'
+            );
+        }
+
+        return $rows[0];
+    }
+
+    /**
+     * @param   array<string, mixed>  $row
+     *
+     * @return  array<string, mixed>
+     */
+    private function describeExtension(array $row): array
+    {
+        return [
+            'extension_id' => (int) $row['extension_id'],
+            'name'         => (string) $row['name'],
+            'type'         => (string) $row['type'],
+            'element'      => (string) $row['element'],
+            'folder'       => (string) $row['folder'],
+            'client'       => (int) $row['client_id'] === 1 ? 'administrator' : 'site',
+            'enabled'      => (int) $row['enabled'] === 1,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeExtensionParams(mixed $raw): array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        if (!is_string($raw) || trim($raw) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Where the extension declares its options. A component keeps them in its own
+     * config.xml; every other type declares them inside its installation manifest,
+     * whose name and location differ per type.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function extensionManifestPath(array $row): ?string
+    {
+        $element = (string) ($row['element'] ?? '');
+        $folder = (string) ($row['folder'] ?? '');
+
+        // Both become path segments below. A row holding anything but the characters
+        // Joomla's installer allows in them is not looked up on disk at all.
+        if (!$this->isSafePathSegment($element) || ($folder !== '' && !$this->isSafePathSegment($folder))) {
+            return null;
+        }
+
+        $client = (int) ($row['client_id'] ?? 0) === 1 ? JPATH_ADMINISTRATOR : JPATH_ROOT;
+
+        $path = match ((string) ($row['type'] ?? '')) {
+            'component' => JPATH_ADMINISTRATOR . '/components/' . $element . '/config.xml',
+            'plugin'    => $folder === ''
+                ? null
+                : JPATH_ROOT . '/plugins/' . $folder . '/' . $element . '/' . $element . '.xml',
+            'module'    => $client . '/modules/' . $element . '/' . $element . '.xml',
+            'template'  => $client . '/templates/' . $element . '/templateDetails.xml',
+            'library'   => JPATH_ADMINISTRATOR . '/manifests/libraries/' . $element . '.xml',
+            default     => null,
+        };
+
+        return $path !== null && is_file($path) ? $path : null;
+    }
+
+    private function isSafePathSegment(string $value): bool
+    {
+        return preg_match('/^[A-Za-z0-9._-]+$/', $value) === 1 && !str_contains($value, '..');
+    }
+
+    private function pathRelativeToRoot(string $path): string
+    {
+        return str_starts_with($path, JPATH_ROOT . '/')
+            ? substr($path, strlen(JPATH_ROOT) + 1)
+            : $path;
+    }
+
+    /**
+     * The options an extension declares, flattened across its fieldsets. Labels are
+     * returned as the language keys the manifest holds: the extension's own language
+     * files are not loaded in this context, so translating them here would yield the
+     * key back anyway.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function readExtensionOptionDefinitions(string $manifestPath): array
+    {
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_file($manifestPath);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (!$xml instanceof \SimpleXMLElement) {
+            return [];
+        }
+
+        // A component's config.xml is itself the <config> block; every other type
+        // carries one inside its manifest root.
+        $config = $xml->getName() === 'config' ? $xml : (isset($xml->config) ? $xml->config : null);
+        if (!$config instanceof \SimpleXMLElement) {
+            return [];
+        }
+
+        $definitions = [];
+        foreach ($this->optionFieldContainers($config) as $container) {
+            foreach ($container->field as $field) {
+                $definition = $this->describeOptionField($field, (string) ($container['name'] ?? ''));
+                if ($definition !== null && !in_array($definition['name'], array_column($definitions, 'name'), true)) {
+                    $definitions[] = $definition;
+                }
+            }
+        }
+
+        return $definitions;
+    }
+
+    /**
+     * The elements holding <field> children for the params group. An extension
+     * manifest wraps its fieldsets in <fields name="params">; a component's
+     * config.xml puts them straight under <config>. Fields written directly into a
+     * container, without a fieldset, are picked up from the container itself.
+     *
+     * @return list<\SimpleXMLElement>
+     */
+    private function optionFieldContainers(\SimpleXMLElement $config): array
+    {
+        $groups = [];
+        if (isset($config->fields)) {
+            foreach ($config->fields as $fields) {
+                $name = (string) ($fields['name'] ?? '');
+                // An unnamed group is the params group by default; any other name
+                // (a component's <fields name="rules">, say) belongs elsewhere.
+                if ($name === '' || $name === 'params') {
+                    $groups[] = $fields;
+                }
+            }
+        } else {
+            $groups[] = $config;
+        }
+
+        $containers = [];
+        foreach ($groups as $group) {
+            if (isset($group->field)) {
+                $containers[] = $group;
+            }
+            foreach ($group->fieldset as $fieldset) {
+                $containers[] = $fieldset;
+            }
+        }
+
+        return $containers;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function describeOptionField(\SimpleXMLElement $field, string $fieldset): ?array
+    {
+        $name = trim((string) ($field['name'] ?? ''));
+        $type = (string) ($field['type'] ?? '');
+
+        // Layout-only fields store nothing, so they are not options a caller can set.
+        if ($name === '' || in_array(strtolower($type), ['spacer', 'note'], true)) {
+            return null;
+        }
+
+        $definition = [
+            'name'     => $name,
+            'type'     => $type,
+            'label'    => (string) ($field['label'] ?? ''),
+            'fieldset' => $fieldset,
+            'default'  => isset($field['default']) ? (string) $field['default'] : null,
+        ];
+
+        $options = [];
+        foreach ($field->option as $option) {
+            $options[] = [
+                'value' => (string) ($option['value'] ?? ''),
+                'label' => trim((string) $option),
+            ];
+        }
+
+        if ($options !== []) {
+            $definition['options'] = $options;
+        }
+
+        return $definition;
+    }
+
+    /**
+     * Mask the values of options the manifest declares as passwords. Extensions keep
+     * real credentials there — SMTP passwords, third-party API secrets — and a read
+     * tool has no reason to hand them out; the merge semantics of the write tool mean
+     * a masked value never has to be sent back to preserve it.
+     *
+     * @param   array<string, mixed>        $values
+     * @param   list<array<string, mixed>>  $definitions
+     *
+     * @return  array{0: array<string, mixed>, 1: list<string>}
+     */
+    private function redactSecretParams(array $values, array $definitions): array
+    {
+        $secrets = [];
+        foreach ($definitions as $definition) {
+            if (strtolower((string) $definition['type']) === 'password') {
+                $secrets[$definition['name']] = true;
+            }
+        }
+
+        $redacted = [];
+        foreach ($values as $key => $value) {
+            if (isset($secrets[$key]) && $value !== '' && $value !== null) {
+                $values[$key] = self::EXTENSION_PARAMS_REDACTION;
+                $redacted[] = (string) $key;
+            }
+        }
+
+        return [$values, $redacted];
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     */
+    private function extensionLocatorKey(array $params): string
+    {
+        return md5((string) json_encode([
+            (int) ($params['extension_id'] ?? 0),
+            strtolower(trim((string) ($params['element'] ?? ''))),
+            (string) ($params['type'] ?? ''),
+            (string) ($params['folder'] ?? ''),
+            (string) ($params['client'] ?? ''),
+        ]));
+    }
+
     private function uninstallExtension(array $params): array
     {
         $extensionId = (int) ($params['extension_id'] ?? 0);
@@ -3271,7 +3716,7 @@ class RpcService
         $query = $db->getQuery(true)
             ->select($db->quoteName([
                 'extension_id', 'name', 'type', 'element', 'folder',
-                'client_id', 'enabled', 'protected', 'locked',
+                'client_id', 'enabled', 'protected', 'locked', 'params',
             ]))
             ->from($db->quoteName('#__extensions'))
             ->where($db->quoteName('extension_id') . ' = ' . $extensionId);
@@ -3287,6 +3732,7 @@ class RpcService
     private function invalidateExtensionCaches(string $type): void
     {
         $this->cache->deleteByPrefix('extensions_list:');
+        $this->cache->deleteByPrefix('extension_params:');
         $this->cache->deleteByPrefix('installed_templates:');
         $this->cache->deleteByPrefix('installed_languages:');
 

@@ -18,7 +18,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 86 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 88 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -152,10 +152,26 @@ Article versioning tools require Joomla article versioning to be enabled.
 |---|---|
 | `list_extensions` | List installed extensions (components, modules, plugins, templates, languages, …) |
 | `set_extension_state` | Enable or disable an installed extension (e.g. activate a plugin after installing it) |
+| `get_extension_params` | Read an extension's saved Options, plus the option definitions its manifest declares (name, type, default, list options) |
+| `update_extension_params` | Update an extension's saved Options, merging into the stored values — only the keys you send change |
 | `install_extension` | Install a Joomla extension from a base64 zip or a download URL (arbitrary code execution — restrict to trusted callers) |
 | `uninstall_extension` | Uninstall an extension by `extension_id` (protected/locked core extensions are refused) |
 
-`install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in. The custom field tools are disabled by default too, for a different reason — see below.
+`install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in. The extension params tools and the custom field tools are disabled by default too, for different reasons — see below.
+
+#### Extension Options
+
+`get_extension_params` and `update_extension_params` read and write `#__extensions.params`: the settings an administrator edits on an extension's Options screen (a plugin's options, a component's Options, a template's or module type's defaults). Joomla's Web Services API ignores `params` on an extension write, so this is the only way to configure a plugin without a round-trip through the backend — the case that motivates them is deploying a plugin and setting its options in the same run.
+
+Identify the extension by `extension_id` (from `list_extensions`) or by `element` plus `type`, adding `folder` for a plugin and `client` when the same element is installed for both site and administrator.
+
+- **Writes merge.** Only the keys you send change; every other stored option is left alone. A `null` value removes a key. A nested object is replaced wholesale rather than deep-merged.
+- **Read first.** `get_extension_params` also returns `option_definitions`, read from the extension's own manifest (`config.xml` for a component, the installation manifest for everything else): the key names, types, defaults and list options. An extension whose Options have never been saved stores an empty `params` object even though its manifest declares defaults, so this is how you learn what it accepts. Keys the manifest does not declare are still written, and reported back in `unknown_keys` so a typo is visible.
+- **Module and template *instances* are elsewhere.** Use `update_module` or `update_template_style` for those; these tools change the extension row, not an instance.
+- **Secrets are masked.** Values of manifest fields typed `password` are returned as `********` and listed in `redacted_keys`. Extensions with no manifest on disk have no definitions to consult, so nothing is masked for them.
+- **The MCP server's own component is refused**, for reading and for writing. Its options hold the bearer token and the Joomla API token, and they carry the policy — read-only mode, Disabled Tools, authentication — that gates these tools. Change them in the administrator.
+
+Both are **disabled by default**, for a third reason than the code-execution and custom field tools: an extension's Options are where third-party extensions keep their credentials, so reading them is a disclosure risk, and writing them reconfigures the site. In Governed Mode both require site-wide `core.admin`, matching Joomla's own gating of Options screens.
 
 ### Multilingual associations
 
@@ -274,7 +290,7 @@ Key settings:
 - `Allowed Origins`: comma-separated CORS origin allow list.
 - `Trusted Proxies`: comma-separated proxy IPs trusted for `X-Forwarded-For`.
 - `Read-Only Mode`: when enabled, only read-only tools may run; every tool that writes, deletes or installs anything is blocked.
-- `Disabled Tools`: comma- or newline-separated MCP tool names to block (e.g. `delete_article`). Defaults to the code-execution tools (`install_extension`, `uninstall_extension`, `update_template_file`); remove them to opt in, or enter `none` to allow all tools (an emptied field reverts to the defaults when saved).
+- `Disabled Tools`: comma- or newline-separated MCP tool names to block (e.g. `delete_article`). Defaults to the code-execution tools (`install_extension`, `uninstall_extension`, `update_template_file`), the custom field tools and the extension params tools (`get_extension_params`, `update_extension_params`); remove them to opt in, or enter `none` to allow all tools (an emptied field reverts to the defaults when saved).
 - `Enable Resources`: when enabled (the default), MCP clients can list and read recent published articles as `joomla://article/{id}` resources.
 - `Enable Prompts`: when enabled (the default), MCP clients can use the draft, SEO audit and translate article prompts.
 - `Rate Limit Requests` and `Rate Limit Window`: fixed-window rate limit settings.

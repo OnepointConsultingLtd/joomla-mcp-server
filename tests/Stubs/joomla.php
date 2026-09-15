@@ -32,15 +32,25 @@ namespace Joomla\CMS {
             return self::$dbo;
         }
 
+        /** One stub controller per cache group, so a test can inspect the one a service used. */
+        public static array $caches = [];
+
         public static function getDate(string $time = 'now'): \Joomla\CMS\Date\Date
         {
             return new \Joomla\CMS\Date\Date($time);
+        }
+
+        public static function getCache(string $group = '', string $handler = 'callback', ?string $storage = null): object
+        {
+            return self::$caches[$group] ??= new \Joomla\Component\Mcpserver\Tests\Stubs\StubCacheController($group);
         }
 
         public static function reset(): void
         {
             self::$application = null;
             self::$dbo = null;
+            self::$caches = [];
+            \Joomla\Component\Mcpserver\Tests\Stubs\StubCacheController::reset();
         }
     }
 
@@ -309,6 +319,70 @@ namespace Joomla\Component\Mcpserver\Tests\Stubs {
             $this->clauses[] = 'where ' . $condition;
 
             return $this;
+        }
+    }
+
+    /**
+     * What Factory::getCache() hands back: the slice of Joomla's CacheController
+     * that JoomlaCache drives. Cleaned groups are recorded statically because the
+     * component clears a group through a throwaway instance.
+     */
+    class StubCacheController
+    {
+        /** Groups cleaned through any controller, in order. @var list<string> */
+        public static array $cleaned = [];
+
+        /** @var array<string, mixed> */
+        private array $items = [];
+
+        public bool $caching = false;
+
+        public int $lifeTime = 0;
+
+        public function __construct(public readonly string $group)
+        {
+        }
+
+        public function setCaching(bool $enabled): void
+        {
+            $this->caching = $enabled;
+        }
+
+        public function setLifeTime(int $minutes): void
+        {
+            $this->lifeTime = $minutes;
+        }
+
+        public function get(string $key): mixed
+        {
+            return $this->items[$key] ?? false;
+        }
+
+        public function store(mixed $value, string $key): bool
+        {
+            $this->items[$key] = $value;
+
+            return true;
+        }
+
+        public function remove(string $key): bool
+        {
+            unset($this->items[$key]);
+
+            return true;
+        }
+
+        public function clean(string $group): bool
+        {
+            self::$cleaned[] = $group;
+            $this->items = [];
+
+            return true;
+        }
+
+        public static function reset(): void
+        {
+            self::$cleaned = [];
         }
     }
 

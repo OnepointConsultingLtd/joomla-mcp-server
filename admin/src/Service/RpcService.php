@@ -185,6 +185,21 @@ class RpcService
             'get_rendered_page'             => fn(array $p) => $this->getRenderedPage($p),
             'seo_audit_articles'            => fn(array $p) => $this->seoAuditArticles($p),
             'check_internal_links'          => fn(array $p) => $this->checkInternalLinks($p),
+            'list_field_groups'             => fn(array $p) => $this->listFieldGroups($p),
+            'get_field_group'               => fn(array $p) => $this->getFieldGroup($p),
+            'create_field_group'            => fn(array $p) => $this->createFieldGroup($p),
+            'update_field_group'            => fn(array $p) => $this->updateFieldGroup($p),
+            'delete_field_group'            => fn(array $p) => $this->deleteFieldGroup($p),
+            'reorder_field_groups'          => fn(array $p) => $this->reorderFieldGroups($p),
+            'list_fields'                   => fn(array $p) => $this->listFields($p),
+            'get_field'                     => fn(array $p) => $this->getField($p),
+            'find_field_by_name'            => fn(array $p) => $this->findFieldByName($p),
+            'create_field'                  => fn(array $p) => $this->createField($p),
+            'update_field'                  => fn(array $p) => $this->updateField($p),
+            'delete_field'                  => fn(array $p) => $this->deleteField($p),
+            'reorder_fields'                => fn(array $p) => $this->reorderFields($p),
+            'get_item_field_values'         => fn(array $p) => $this->getItemFieldValues($p),
+            'set_item_field_values'         => fn(array $p) => $this->setItemFieldValues($p),
         ];
 
         foreach ($executors as $name => $executor) {
@@ -2264,6 +2279,50 @@ class RpcService
         return $adapter . implode('/', $segments);
     }
 
+    /**
+     * Core Joomla declares exactly six custom field contexts (FieldsServiceInterface::getContexts()
+     * in com_content, com_contact and com_users) and the webservices plugins route every one of
+     * them, so the whole com_fields family stays on the Web Services API and inherits Joomla's ACL.
+     */
+    private const FIELD_CONTEXT_ROUTES = [
+        'com_content.article'    => 'content/articles',
+        'com_content.categories' => 'content/categories',
+        'com_contact.contact'    => 'contacts/contact',
+        'com_contact.mail'       => 'contacts/mail',
+        'com_contact.categories' => 'contacts/categories',
+        'com_users.user'         => 'users',
+    ];
+
+    /**
+     * There is no plg_webservices_fields: each component's own webservices plugin registers the
+     * com_fields routes for its contexts. A 404 on a fields collection therefore means a disabled
+     * plugin far more often than a missing record, so name the plugin the admin has to enable.
+     */
+    private const FIELD_CONTEXT_PLUGINS = [
+        'com_content' => 'plg_webservices_content',
+        'com_contact' => 'plg_webservices_contact',
+        'com_users'   => 'plg_webservices_users',
+    ];
+
+    /**
+     * Field values live on the owning item's own resource, not on the fields endpoint, and only
+     * the controllers implementing preprocessSaveData() can write them. com_categories does not,
+     * so category field values are readable but not writable; com_contact.mail is the contact form
+     * and stores no items at all, so it is absent entirely.
+     */
+    private const FIELD_VALUE_ITEM_ROUTES = [
+        'com_content.article'    => ['path' => 'api/index.php/v1/content/articles', 'writable' => true],
+        'com_content.categories' => ['path' => 'api/index.php/v1/content/categories', 'writable' => false],
+        'com_contact.contact'    => ['path' => 'api/index.php/v1/contacts', 'writable' => true],
+        'com_users.user'         => ['path' => 'api/index.php/v1/users', 'writable' => true],
+    ];
+
+    /** Scalar #__fields columns update_field copies straight through, by cast. */
+    private const FIELD_STRING_COLUMNS = ['title', 'name', 'label', 'type', 'description', 'note', 'default_value', 'language'];
+    private const FIELD_INT_COLUMNS = ['group_id', 'required', 'only_use_in_subform', 'state', 'access', 'ordering'];
+    private const FIELD_GROUP_STRING_COLUMNS = ['title', 'description', 'note', 'language'];
+    private const FIELD_GROUP_INT_COLUMNS = ['state', 'access', 'ordering'];
+
     private const CONTENT_LANGUAGES_PATH = 'api/index.php/v1/languages';
     private const CATEGORIES_PATH = 'api/index.php/v1/content/categories';
     private const TAGS_PATH = 'api/index.php/v1/tags';
@@ -2418,7 +2477,7 @@ class RpcService
                 return [
                     'data' => $data,
                     'meta' => [
-                        'application_default' => (string) Factory::getConfig()->get('language', 'en-GB'),
+                        'application_default' => (string) Factory::getApplication()->get('language', 'en-GB'),
                     ],
                 ];
             }),
@@ -4213,5 +4272,859 @@ class RpcService
 
         return $fallback;
     }
+
+    // ---------------------------------------------------------------------
+    // Custom fields (com_fields)
+    // ---------------------------------------------------------------------
+
+    private function listFieldGroups(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $query = $this->fieldListQuery($params, ['state']);
+        $path = $this->fieldGroupsPath($context);
+        $cacheKey = 'field_groups_list:' . $context . ':' . md5(json_encode($query));
+
+        return $this->withPaginationMetadata(
+            $this->cache->remember(
+                $cacheKey,
+                fn () => $this->withFieldRouteErrors($context, fn () => $this->rest->get($path, $query))
+            ),
+            $params,
+            'data',
+            true
+        );
+    }
+
+    private function getFieldGroup(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+
+        return $this->fetchFieldResponse($this->fieldGroupsPath($context), 'Field group', $context, $id);
+    }
+
+    private function createFieldGroup(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $path = $this->fieldGroupsPath($context);
+
+        $payload = [
+            'context'  => $context,
+            'title'    => $this->requireFieldString($params, 'title'),
+            'state'    => (int) ($params['state'] ?? 1),
+            'access'   => (int) ($params['access'] ?? 1),
+            'language' => (string) ($params['language'] ?? '*'),
+        ];
+
+        foreach (['description', 'note'] as $key) {
+            if (isset($params[$key])) {
+                $payload[$key] = (string) $params[$key];
+            }
+        }
+
+        if (is_array($params['params'] ?? null)) {
+            $payload['params'] = $params['params'];
+        }
+
+        $result = $this->withFieldRouteErrors($context, fn () => $this->rest->post($path, $payload));
+        $this->invalidateFieldCaches();
+
+        return $result;
+    }
+
+    private function updateFieldGroup(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+        $path = $this->fieldGroupsPath($context);
+
+        $this->requireFieldUpdates(
+            $params,
+            array_merge(self::FIELD_GROUP_STRING_COLUMNS, self::FIELD_GROUP_INT_COLUMNS, ['params'])
+        );
+
+        $existing = $this->fieldAttributes(
+            $this->fetchFieldResponse($path, 'Field group', $context, $id),
+            'field group',
+            $id
+        );
+
+        $payload = $this->buildFieldPayload($params, self::FIELD_GROUP_STRING_COLUMNS, self::FIELD_GROUP_INT_COLUMNS);
+        $payload['context'] = $context;
+        $payload['params'] = $this->mergeFieldRegistry(
+            $existing['params'] ?? null,
+            is_array($params['params'] ?? null) ? $params['params'] : []
+        );
+
+        $this->rest->patch($path . '/' . $id, $payload);
+        $this->invalidateFieldCaches();
+
+        return $this->rest->get($path . '/' . $id);
+    }
+
+    private function deleteFieldGroup(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+
+        return $this->deleteFieldRecord($this->fieldGroupsPath($context), 'Field group', $context, $id);
+    }
+
+    private function reorderFieldGroups(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+
+        return $this->reorderFieldRecords($params, $this->fieldGroupsPath($context), 'Field group', $context);
+    }
+
+    private function listFields(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $query = $this->fieldListQuery($params, ['state', 'group_id'], ['search']);
+        $path = $this->fieldsPath($context);
+        $cacheKey = 'fields_list:' . $context . ':' . md5(json_encode($query));
+
+        return $this->withPaginationMetadata(
+            $this->cache->remember(
+                $cacheKey,
+                fn () => $this->withFieldRouteErrors($context, fn () => $this->rest->get($path, $query))
+            ),
+            $params,
+            'data',
+            true
+        );
+    }
+
+    private function getField(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+
+        $response = $this->fetchFieldResponse($this->fieldsPath($context), 'Field', $context, $id);
+
+        if (is_array($response['data']['attributes'] ?? null)) {
+            $response['data']['attributes'] = $this->decorateFieldRecord($response['data']['attributes']);
+        }
+
+        return $response;
+    }
+
+    private function findFieldByName(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $name = $this->requireFieldString($params, 'name');
+
+        foreach ($this->fetchAllFieldRecords($this->fieldsPath($context), $context) as $record) {
+            $attributes = $record['attributes'] ?? null;
+
+            if (!is_array($attributes) || strcasecmp((string) ($attributes['name'] ?? ''), $name) !== 0) {
+                continue;
+            }
+
+            $record['attributes'] = $this->decorateFieldRecord($attributes);
+
+            return ['data' => $record];
+        }
+
+        throw new \InvalidArgumentException(
+            'No field with the technical name "' . $name . '" exists in context ' . $context
+            . '. Use list_fields to see the available names.'
+        );
+    }
+
+    private function createField(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $path = $this->fieldsPath($context);
+
+        $payload = $this->buildFieldPayload($params, self::FIELD_STRING_COLUMNS, self::FIELD_INT_COLUMNS);
+        $payload['context'] = $context;
+        $payload['title'] = $this->requireFieldString($params, 'title');
+        $payload['type'] = (string) ($params['type'] ?? 'text');
+        $payload['state'] = (int) ($params['state'] ?? 1);
+        $payload['access'] = (int) ($params['access'] ?? 1);
+        $payload['required'] = (int) ($params['required'] ?? 0);
+        $payload['language'] = (string) ($params['language'] ?? '*');
+
+        foreach (['params', 'fieldparams'] as $key) {
+            if (is_array($params[$key] ?? null)) {
+                $payload[$key] = $params[$key];
+            }
+        }
+
+        if (array_key_exists('assigned_cat_ids', $params)) {
+            $payload['assigned_cat_ids'] = $this->normaliseAssignedCatIds($params['assigned_cat_ids']);
+        }
+
+        $result = $this->withFieldRouteErrors($context, fn () => $this->rest->post($path, $payload));
+        $this->invalidateFieldCaches();
+        $this->invalidateFieldValueItemCaches($context);
+
+        return $result;
+    }
+
+    private function updateField(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+        $path = $this->fieldsPath($context);
+
+        $this->requireFieldUpdates(
+            $params,
+            array_merge(
+                self::FIELD_STRING_COLUMNS,
+                self::FIELD_INT_COLUMNS,
+                ['params', 'fieldparams', 'assigned_cat_ids']
+            )
+        );
+
+        $existing = $this->fieldAttributes(
+            $this->fetchFieldResponse($path, 'Field', $context, $id),
+            'field',
+            $id
+        );
+
+        $payload = $this->buildFieldPayload($params, self::FIELD_STRING_COLUMNS, self::FIELD_INT_COLUMNS);
+        $payload['context'] = $context;
+
+        // Joomla's PATCH handler backfills table columns only, and FieldTable::bind then replaces
+        // the whole params/fieldparams column with whatever array it is handed. A partial object
+        // would silently discard every key the caller did not send, so merge and send them whole.
+        $payload['params'] = $this->mergeFieldRegistry(
+            $existing['params'] ?? null,
+            is_array($params['params'] ?? null) ? $params['params'] : []
+        );
+        $payload['fieldparams'] = $this->mergeFieldRegistry(
+            $existing['fieldparams'] ?? null,
+            is_array($params['fieldparams'] ?? null) ? $params['fieldparams'] : []
+        );
+
+        // assigned_cat_ids is not a column — it lives in #__fields_categories — so the PATCH
+        // backfill never restores it, and FieldModel::save() deletes every assignment when it is
+        // absent. Always resend it, keeping Joomla's [0] "all categories" sentinel as it came.
+        $payload['assigned_cat_ids'] = array_key_exists('assigned_cat_ids', $params)
+            ? $this->normaliseAssignedCatIds($params['assigned_cat_ids'])
+            : $this->normaliseAssignedCatIds($existing['assigned_cat_ids'] ?? []);
+
+        // 'rules' is deliberately never sent: FieldTable::bind only calls setRules() when the key
+        // is present, so omitting it leaves the field's permissions untouched.
+        $this->rest->patch($path . '/' . $id, $payload);
+        $this->invalidateFieldCaches();
+        $this->invalidateFieldValueItemCaches($context);
+
+        $response = $this->rest->get($path . '/' . $id);
+
+        if (is_array($response['data']['attributes'] ?? null)) {
+            $response['data']['attributes'] = $this->decorateFieldRecord($response['data']['attributes']);
+        }
+
+        return $response;
+    }
+
+    private function deleteField(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+        $id = $this->requireFieldId($params);
+
+        $result = $this->deleteFieldRecord($this->fieldsPath($context), 'Field', $context, $id);
+        $this->invalidateFieldValueItemCaches($context);
+
+        return $result;
+    }
+
+    private function reorderFields(array $params): array
+    {
+        $context = $this->requireFieldContext($params);
+
+        $result = $this->reorderFieldRecords($params, $this->fieldsPath($context), 'Field', $context);
+        // Values do not change, but items render their fields in this order.
+        $this->invalidateFieldValueItemCaches($context);
+
+        return $result;
+    }
+
+    private function getItemFieldValues(array $params): array
+    {
+        $context = $this->requireFieldValueContext($params);
+        $itemId = $this->requireFieldId($params, 'item_id');
+        $attributes = $this->fetchFieldValueItem($context, $itemId);
+
+        $values = [];
+
+        foreach ($this->fetchAllFieldRecords($this->fieldsPath($context), $context) as $record) {
+            $field = $record['attributes'] ?? null;
+            $name = is_array($field) ? (string) ($field['name'] ?? '') : '';
+
+            if ($name === '' || !array_key_exists($name, $attributes)) {
+                continue;
+            }
+
+            $options = $this->expandFieldOptions($field);
+
+            $values[] = [
+                'field_id'      => (int) ($field['id'] ?? $record['id'] ?? 0),
+                'name'          => $name,
+                'label'         => (string) ($field['label'] ?? $field['title'] ?? $name),
+                'type'          => (string) ($field['type'] ?? ''),
+                'raw_value'     => $attributes[$name],
+                'display_value' => $this->resolveFieldDisplayValue($attributes[$name], $options),
+            ];
+        }
+
+        return [
+            'context' => $context,
+            'item_id' => $itemId,
+            'values'  => $values,
+        ];
+    }
+
+    private function setItemFieldValues(array $params): array
+    {
+        $context = $this->requireFieldValueContext($params);
+        $route = self::FIELD_VALUE_ITEM_ROUTES[$context];
+
+        if ($route['writable'] !== true) {
+            throw new \InvalidArgumentException(
+                'Joomla\'s Web Services API cannot write custom field values for context ' . $context
+                . ' — its API controller does not map field names onto com_fields. Writable contexts: '
+                . implode(', ', $this->writableFieldValueContexts())
+            );
+        }
+
+        $itemId = $this->requireFieldId($params, 'item_id');
+        $values = $params['values'] ?? null;
+
+        if (!is_array($values) || $values === []) {
+            throw new \InvalidArgumentException('values is required and must name at least one field');
+        }
+
+        $known = [];
+
+        foreach ($this->fetchAllFieldRecords($this->fieldsPath($context), $context) as $record) {
+            $name = (string) ($record['attributes']['name'] ?? '');
+
+            if ($name !== '') {
+                $known[] = $name;
+            }
+        }
+
+        // Joomla drops keys that do not match a field name without complaining, which would read
+        // back to the caller as a successful no-op. Reject them before writing anything.
+        $unknown = array_diff(array_keys($values), $known);
+
+        if ($unknown !== []) {
+            throw new \InvalidArgumentException(
+                'Unknown field name(s) for context ' . $context . ': ' . implode(', ', $unknown)
+                . '. Known field names: ' . ($known === [] ? '(none)' : implode(', ', $known))
+            );
+        }
+
+        $this->rest->patch($route['path'] . '/' . $itemId, $values);
+        $this->invalidateFieldValueItemCaches($context, $itemId);
+
+        return $this->getItemFieldValues(['context' => $context, 'item_id' => $itemId]);
+    }
+
+    // --- com_fields helpers ----------------------------------------------
+
+    private function requireFieldContext(array $params): string
+    {
+        $context = trim((string) ($params['context'] ?? ''));
+
+        if ($context === '') {
+            throw new \InvalidArgumentException('context is required');
+        }
+
+        if (!isset(self::FIELD_CONTEXT_ROUTES[$context])) {
+            throw new \InvalidArgumentException(
+                'Unknown field context "' . $context . '". Valid contexts: '
+                . implode(', ', array_keys(self::FIELD_CONTEXT_ROUTES))
+            );
+        }
+
+        return $context;
+    }
+
+    private function requireFieldValueContext(array $params): string
+    {
+        $context = $this->requireFieldContext($params);
+
+        if (!isset(self::FIELD_VALUE_ITEM_ROUTES[$context])) {
+            throw new \InvalidArgumentException(
+                'Context ' . $context . ' stores no items, so it has no field values to read or write.'
+                . ' Contexts with items: ' . implode(', ', array_keys(self::FIELD_VALUE_ITEM_ROUTES))
+            );
+        }
+
+        return $context;
+    }
+
+    /** @return list<string> */
+    private function writableFieldValueContexts(): array
+    {
+        $writable = [];
+
+        foreach (self::FIELD_VALUE_ITEM_ROUTES as $context => $route) {
+            if ($route['writable'] === true) {
+                $writable[] = $context;
+            }
+        }
+
+        return $writable;
+    }
+
+    private function fieldsPath(string $context): string
+    {
+        return 'api/index.php/v1/fields/' . self::FIELD_CONTEXT_ROUTES[$context];
+    }
+
+    private function fieldGroupsPath(string $context): string
+    {
+        return 'api/index.php/v1/fields/groups/' . self::FIELD_CONTEXT_ROUTES[$context];
+    }
+
+    private function requireFieldId(array $params, string $key = 'id'): int
+    {
+        $id = (int) ($params[$key] ?? 0);
+
+        if ($id <= 0) {
+            throw new \InvalidArgumentException($key . ' is required');
+        }
+
+        return $id;
+    }
+
+    private function requireFieldString(array $params, string $key): string
+    {
+        $value = trim((string) ($params[$key] ?? ''));
+
+        if ($value === '') {
+            throw new \InvalidArgumentException($key . ' is required');
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @param  list<string>          $updatable
+     */
+    private function requireFieldUpdates(array $params, array $updatable): void
+    {
+        foreach ($updatable as $key) {
+            if (array_key_exists($key, $params)) {
+                return;
+            }
+        }
+
+        throw new \InvalidArgumentException('No updatable fields supplied');
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @param  list<string>          $intFilters
+     * @param  list<string>          $stringFilters
+     * @return array<string, mixed>
+     */
+    private function fieldListQuery(array $params, array $intFilters = [], array $stringFilters = []): array
+    {
+        $query = $this->buildPageQuery($params);
+
+        foreach ($intFilters as $key) {
+            if (isset($params[$key])) {
+                $query['filter[' . $key . ']'] = (int) $params[$key];
+            }
+        }
+
+        foreach ($stringFilters as $key) {
+            if (isset($params[$key]) && (string) $params[$key] !== '') {
+                $query['filter[' . $key . ']'] = (string) $params[$key];
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * Copy only the keys the caller actually supplied, cast to their column type, so an omitted
+     * key is left to Joomla's own PATCH backfill rather than being reset to a default.
+     *
+     * @param  array<string, mixed>  $params
+     * @param  list<string>          $stringColumns
+     * @param  list<string>          $intColumns
+     * @return array<string, mixed>
+     */
+    private function buildFieldPayload(array $params, array $stringColumns, array $intColumns): array
+    {
+        $payload = [];
+
+        foreach ($stringColumns as $key) {
+            if (array_key_exists($key, $params)) {
+                $payload[$key] = (string) $params[$key];
+            }
+        }
+
+        foreach ($intColumns as $key) {
+            if (array_key_exists($key, $params)) {
+                $payload[$key] = (int) $params[$key];
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  mixed  $value
+     * @return list<int>
+     */
+    private function normaliseAssignedCatIds(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_map('intval', $value));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchFieldResponse(string $path, string $label, string $context, int $id): array
+    {
+        try {
+            return $this->rest->get($path . '/' . $id);
+        } catch (\Throwable $e) {
+            if ($this->fieldResponseStatus($e) === 404) {
+                throw new \InvalidArgumentException(
+                    $label . ' ' . $id . ' was not found in context ' . $context,
+                    0,
+                    $e
+                );
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     * @return array<string, mixed>
+     */
+    private function fieldAttributes(array $response, string $label, int $id): array
+    {
+        $attributes = $response['data']['attributes'] ?? null;
+
+        if (!is_array($attributes)) {
+            throw new \RuntimeException(
+                'The Joomla Web Services API returned no attributes for ' . $label . ' ' . $id
+            );
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * A 404 on a fields collection cannot mean "record missing" — an empty collection is a 200 —
+     * so it is always a missing route, and the fix is enabling a plugin.
+     *
+     * @template TReturn
+     * @param  callable(): TReturn  $call
+     * @return TReturn
+     */
+    private function withFieldRouteErrors(string $context, callable $call): mixed
+    {
+        try {
+            return $call();
+        } catch (\Throwable $e) {
+            if ($this->fieldResponseStatus($e) !== 404) {
+                throw $e;
+            }
+
+            $component = explode('.', $context)[0];
+            $plugin = self::FIELD_CONTEXT_PLUGINS[$component] ?? null;
+
+            throw new \RuntimeException(
+                'The Joomla Web Services API has no custom fields route for context ' . $context . '.'
+                . ($plugin === null
+                    ? ''
+                    : ' Core registers it from the ' . $plugin . ' plugin, so enable that plugin in'
+                        . ' the Joomla plugin manager.'),
+                0,
+                $e
+            );
+        }
+    }
+
+    private function fieldResponseStatus(\Throwable $e): ?int
+    {
+        return $e instanceof RequestException && $e->hasResponse()
+            ? $e->getResponse()->getStatusCode()
+            : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchAllFieldRecords(string $path, string $context): array
+    {
+        return $this->cache->remember(
+            'fields_all:' . $path,
+            fn () => $this->withFieldRouteErrors($context, fn () => $this->fetchAllPages($path))
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchFieldValueItem(string $context, int $itemId): array
+    {
+        $route = self::FIELD_VALUE_ITEM_ROUTES[$context];
+
+        try {
+            $response = $this->rest->get($route['path'] . '/' . $itemId);
+        } catch (\Throwable $e) {
+            if ($this->fieldResponseStatus($e) === 404) {
+                throw new \InvalidArgumentException(
+                    'No item with id ' . $itemId . ' exists for context ' . $context,
+                    0,
+                    $e
+                );
+            }
+
+            throw $e;
+        }
+
+        $attributes = $response['data']['attributes'] ?? null;
+
+        return is_array($attributes) ? $attributes : [];
+    }
+
+    /**
+     * Joomla only deletes trashed fields and field groups (both canDelete() implementations
+     * require state -2), so trash first when needed — the same shape as delete_article.
+     *
+     * @return array<string, mixed>
+     */
+    private function deleteFieldRecord(string $path, string $label, string $context, int $id): array
+    {
+        $existing = $this->fieldAttributes(
+            $this->fetchFieldResponse($path, $label, $context, $id),
+            strtolower($label),
+            $id
+        );
+
+        if ((int) ($existing['state'] ?? 0) !== -2) {
+            $this->rest->patch($path . '/' . $id, ['context' => $context, 'state' => -2]);
+        }
+
+        $result = $this->rest->delete($path . '/' . $id);
+        $this->invalidateFieldCaches();
+
+        return $result;
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @return array<string, mixed>
+     */
+    private function reorderFieldRecords(array $params, string $path, string $label, string $context): array
+    {
+        $requested = $params['ordered_ids'] ?? null;
+
+        if (!is_array($requested) || $requested === []) {
+            throw new \InvalidArgumentException('ordered_ids is required and must list at least one id');
+        }
+
+        $ordered = [];
+
+        foreach ($requested as $value) {
+            $id = (int) $value;
+
+            if ($id <= 0) {
+                throw new \InvalidArgumentException('ordered_ids must contain positive integer ids');
+            }
+
+            if (in_array($id, $ordered, true)) {
+                throw new \InvalidArgumentException('ordered_ids contains id ' . $id . ' more than once');
+            }
+
+            $ordered[] = $id;
+        }
+
+        $attributesById = [];
+
+        foreach ($this->fetchAllFieldRecords($path, $context) as $record) {
+            $attributes = is_array($record['attributes'] ?? null) ? $record['attributes'] : [];
+            $id = (int) ($attributes['id'] ?? $record['id'] ?? 0);
+
+            if ($id > 0) {
+                $attributesById[$id] = $attributes;
+            }
+        }
+
+        // Validate the whole list up front so one bad id cannot leave the ordering half-applied.
+        $unknown = array_diff($ordered, array_keys($attributesById));
+
+        if ($unknown !== []) {
+            throw new \InvalidArgumentException(
+                $label . ' id(s) not found in context ' . $context . ': ' . implode(', ', $unknown)
+            );
+        }
+
+        $reordered = [];
+
+        foreach ($ordered as $position => $id) {
+            $payload = ['context' => $context, 'ordering' => $position + 1];
+
+            // Same trap as update_field: a PATCH that omits assigned_cat_ids makes FieldModel
+            // delete every category assignment, and reordering must not touch them.
+            if (array_key_exists('assigned_cat_ids', $attributesById[$id])) {
+                $payload['assigned_cat_ids'] = $this->normaliseAssignedCatIds($attributesById[$id]['assigned_cat_ids']);
+            }
+
+            $this->rest->patch($path . '/' . $id, $payload);
+
+            $reordered[] = ['id' => $id, 'ordering' => $position + 1];
+        }
+
+        $this->invalidateFieldCaches();
+
+        return [
+            'context'   => $context,
+            'reordered' => $reordered,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function decorateFieldRecord(array $attributes): array
+    {
+        $attributes['options'] = $this->expandFieldOptions($attributes);
+
+        return $attributes;
+    }
+
+    /**
+     * list, radio and checkboxes fields store only the option value; the human-readable label
+     * lives in fieldparams.options and is renameable in the admin. Surface the two separately
+     * instead of making callers parse fieldparams, leaving the raw fieldparams alongside.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return list<array{value:string, label:string}>
+     */
+    private function expandFieldOptions(array $attributes): array
+    {
+        $options = $this->decodeFieldRegistry($attributes['fieldparams'] ?? null)['options'] ?? null;
+
+        if (!is_array($options)) {
+            return [];
+        }
+
+        $expanded = [];
+
+        foreach ($options as $option) {
+            if (!is_array($option) || !array_key_exists('value', $option)) {
+                continue;
+            }
+
+            $expanded[] = [
+                'value' => (string) $option['value'],
+                'label' => (string) ($option['name'] ?? $option['value']),
+            ];
+        }
+
+        return $expanded;
+    }
+
+    /**
+     * Anything without options — and any value whose option has since been removed — displays
+     * exactly as it is stored. Multi-value fields arrive as arrays and map element by element.
+     *
+     * @param  list<array{value:string, label:string}>  $options
+     */
+    private function resolveFieldDisplayValue(mixed $raw, array $options): mixed
+    {
+        if ($options === []) {
+            return $raw;
+        }
+
+        $labels = array_column($options, 'label', 'value');
+
+        if (is_array($raw)) {
+            return array_map(static fn ($value) => $labels[(string) $value] ?? $value, $raw);
+        }
+
+        if (is_scalar($raw)) {
+            return $labels[(string) $raw] ?? $raw;
+        }
+
+        return $raw;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeFieldRegistry(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * Shallow merge, matching update_module: a nested object is replaced wholesale rather than
+     * deep-merged, so changing one nested key means sending that whole nested object.
+     *
+     * @param  array<string, mixed>  $supplied
+     * @return array<string, mixed>
+     */
+    private function mergeFieldRegistry(mixed $existing, array $supplied): array
+    {
+        return array_merge($this->decodeFieldRegistry($existing), $supplied);
+    }
+
+    /**
+     * Field values are embedded in the owning item's own API representation — the article
+     * JsonapiView copies every field onto the item, for single reads and for lists alike — so
+     * changing a field definition or a stored value makes cached item responses stale. Pass an id
+     * when only one item changed; omit it when a definition change could affect any of them.
+     *
+     * com_content.article is the only context with cached read tools today (there are no contact
+     * or user tools, and category field values are not writable), so it is the only case here.
+     */
+    private function invalidateFieldValueItemCaches(string $context, ?int $itemId = null): void
+    {
+        if ($context !== 'com_content.article') {
+            return;
+        }
+
+        if ($itemId === null) {
+            $this->cache->deleteByPrefix('article:');
+        } else {
+            $this->cache->delete('article:' . $itemId);
+        }
+
+        // Lists carry field values too: JsonapiView::displayList() adds every field name to
+        // fieldsToRenderList and prepareItem() fills them in per row.
+        $this->cache->deleteByPrefix('articles_search:');
+    }
+
+    private function invalidateFieldCaches(): void
+    {
+        $this->cache->deleteByPrefix('fields_list:');
+        $this->cache->deleteByPrefix('field_groups_list:');
+        $this->cache->deleteByPrefix('fields_all:');
+    }
+
 }
 

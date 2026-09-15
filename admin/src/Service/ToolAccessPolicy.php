@@ -95,6 +95,23 @@ final class ToolAccessPolicy
         'get_rendered_page' => ['kind' => self::DIRECT, 'component' => null, 'action' => null, 'special' => 'rendered_page'],
         'seo_audit_articles' => ['kind' => self::API, 'component' => null, 'action' => null],
         'check_internal_links' => ['kind' => self::DIRECT, 'component' => 'com_content', 'action' => 'core.manage'],
+        // com_fields: core routes every one of its six field contexts through the Web
+        // Services API, so these never touch the database and Joomla's own ACL governs them.
+        'list_field_groups' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'update_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'delete_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'reorder_field_groups' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'list_fields' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'find_field_by_name' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'update_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'delete_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'reorder_fields' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'set_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
     ];
 
     /** @return list<string> */

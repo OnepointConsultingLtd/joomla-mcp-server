@@ -9,8 +9,8 @@
             <item>Added get_extension_params and update_extension_params, which read and write the Options an administrator edits on an extension's Options screen.</item>
         </addition>
         <change>
-            <item>update_field and update_field_group merge params and fieldparams into the existing values rather than replacing them, so only the keys you send change. Joomla's own PATCH handler backfills table columns but hands whatever it receives straight to FieldTable::bind, which replaces the whole column — a partial params object sent directly to the Web Services API silently discards every other key.</item>
-            <item>update_field and reorder_fields always resend the field's category assignments. assigned_cat_ids is not a column in #__fields — it lives in #__fields_categories — so Joomla's PATCH backfill never restores it, and FieldModel::save() deletes every assignment when it is absent. Reordering a field would otherwise have detached it from its categories.</item>
+            <item>update_field and update_field_group merge params and fieldparams into the existing values rather than replacing them, so only the keys you send change. Joomla's own PATCH handler backfills table columns but hands whatever it receives straight to FieldTable::bind, which replaces the whole column \- a partial params object sent directly to the Web Services API silently discards every other key.</item>
+            <item>update_field and reorder_fields always resend the field's category assignments. assigned_cat_ids is not a column in #__fields \- it lives in #__fields_categories \- so Joomla's PATCH backfill never restores it, and FieldModel::save() deletes every assignment when it is absent. Reordering a field would otherwise have detached it from its categories.</item>
             <item>All 15 field tools are disabled by default and must be enabled individually in the Disabled Tools option.</item>
             <item>Both extension params tools are disabled by default.</item>
             <item>Changing a plugin's params now clears Joomla's com_plugins cache group.</item>

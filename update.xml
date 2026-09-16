@@ -8,6 +8,7 @@
         <client>administrator</client>
         <version>1.9.0</version>
         <infourl title="MCP Server for Joomla 1.9.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.9.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.9.0/com_mcpserver-1.9.0.zip</downloadurl>
         </downloads>
@@ -28,6 +29,7 @@
         <client>administrator</client>
         <version>1.8.0</version>
         <infourl title="MCP Server for Joomla 1.8.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.8.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.8.0/com_mcpserver-1.8.0.zip</downloadurl>
         </downloads>
@@ -48,6 +50,7 @@
         <client>administrator</client>
         <version>1.7.1</version>
         <infourl title="MCP Server for Joomla 1.7.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.7.1</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.7.1/com_mcpserver-1.7.1.zip</downloadurl>
         </downloads>
@@ -68,6 +71,7 @@
         <client>administrator</client>
         <version>1.7.0</version>
         <infourl title="MCP Server for Joomla 1.7.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.7.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.7.0/com_mcpserver-1.7.0.zip</downloadurl>
         </downloads>
@@ -88,6 +92,7 @@
         <client>administrator</client>
         <version>1.6.0</version>
         <infourl title="MCP Server for Joomla 1.6.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.6.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.6.0/com_mcpserver-1.6.0.zip</downloadurl>
         </downloads>
@@ -108,6 +113,7 @@
         <client>administrator</client>
         <version>1.5.0</version>
         <infourl title="MCP Server for Joomla 1.5.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.5.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.5.0/com_mcpserver-1.5.0.zip</downloadurl>
         </downloads>
@@ -128,6 +134,7 @@
         <client>administrator</client>
         <version>1.4.2</version>
         <infourl title="MCP Server for Joomla 1.4.2">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.4.2</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.4.2/com_mcpserver-1.4.2.zip</downloadurl>
         </downloads>
@@ -148,6 +155,7 @@
         <client>administrator</client>
         <version>1.4.1</version>
         <infourl title="MCP Server for Joomla 1.4.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.4.1</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.4.1/com_mcpserver-1.4.1.zip</downloadurl>
         </downloads>
@@ -168,6 +176,7 @@
         <client>administrator</client>
         <version>1.4.0</version>
         <infourl title="MCP Server for Joomla 1.4.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.4.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.4.0/com_mcpserver-1.4.0.zip</downloadurl>
         </downloads>
@@ -188,6 +197,7 @@
         <client>administrator</client>
         <version>1.3.5</version>
         <infourl title="MCP Server for Joomla 1.3.5">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.5</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.5/com_mcpserver-1.3.5.zip</downloadurl>
         </downloads>
@@ -208,6 +218,7 @@
         <client>administrator</client>
         <version>1.3.4</version>
         <infourl title="MCP Server for Joomla 1.3.4">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.4</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.4/com_mcpserver-1.3.4.zip</downloadurl>
         </downloads>
@@ -228,6 +239,7 @@
         <client>administrator</client>
         <version>1.3.3</version>
         <infourl title="MCP Server for Joomla 1.3.3">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.3</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.3/com_mcpserver-1.3.3.zip</downloadurl>
         </downloads>
@@ -248,6 +260,7 @@
         <client>administrator</client>
         <version>1.3.2</version>
         <infourl title="MCP Server for Joomla 1.3.2">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.2</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.2/com_mcpserver-1.3.2.zip</downloadurl>
         </downloads>
@@ -268,6 +281,7 @@
         <client>administrator</client>
         <version>1.3.1</version>
         <infourl title="MCP Server for Joomla 1.3.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.1</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.1/com_mcpserver-1.3.1.zip</downloadurl>
         </downloads>
@@ -288,6 +302,7 @@
         <client>administrator</client>
         <version>1.3.0</version>
         <infourl title="MCP Server for Joomla 1.3.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.3.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.3.0/com_mcpserver-1.3.0.zip</downloadurl>
         </downloads>
@@ -308,6 +323,7 @@
         <client>administrator</client>
         <version>1.2.1</version>
         <infourl title="MCP Server for Joomla 1.2.1">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.2.1</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.2.1/com_mcpserver-1.2.1.zip</downloadurl>
         </downloads>
@@ -328,6 +344,7 @@
         <client>administrator</client>
         <version>1.2.0</version>
         <infourl title="MCP Server for Joomla 1.2.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.2.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.2.0/com_mcpserver-1.2.0.zip</downloadurl>
         </downloads>
@@ -348,6 +365,7 @@
         <client>administrator</client>
         <version>1.1.0</version>
         <infourl title="MCP Server for Joomla 1.1.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.1.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.1.0/com_mcpserver-1.1.0.zip</downloadurl>
         </downloads>
@@ -368,6 +386,7 @@
         <client>administrator</client>
         <version>1.0.0</version>
         <infourl title="MCP Server for Joomla 1.0.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.0.0</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v1.0.0/com_mcpserver-1.0.0.zip</downloadurl>
         </downloads>

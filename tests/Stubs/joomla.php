@@ -32,15 +32,33 @@ namespace Joomla\CMS {
             return self::$dbo;
         }
 
+        /** One stub controller per cache group, so a test can inspect the one a service used. */
+        public static array $caches = [];
+
         public static function getDate(string $time = 'now'): \Joomla\CMS\Date\Date
         {
             return new \Joomla\CMS\Date\Date($time);
+        }
+
+        public static function getCache(string $group = '', string $handler = 'callback', ?string $storage = null): object
+        {
+            return self::$caches[$group] ??= new \Joomla\Component\Mcpserver\Tests\Stubs\StubCacheController($group);
         }
 
         public static function reset(): void
         {
             self::$application = null;
             self::$dbo = null;
+            self::$caches = [];
+            \Joomla\Component\Mcpserver\Tests\Stubs\StubCacheController::reset();
+        }
+    }
+
+    class Version
+    {
+        public function getShortVersion(): string
+        {
+            return '5.2.0';
         }
     }
 }
@@ -305,6 +323,70 @@ namespace Joomla\Component\Mcpserver\Tests\Stubs {
     }
 
     /**
+     * What Factory::getCache() hands back: the slice of Joomla's CacheController
+     * that JoomlaCache drives. Cleaned groups are recorded statically because the
+     * component clears a group through a throwaway instance.
+     */
+    class StubCacheController
+    {
+        /** Groups cleaned through any controller, in order. @var list<string> */
+        public static array $cleaned = [];
+
+        /** @var array<string, mixed> */
+        private array $items = [];
+
+        public bool $caching = false;
+
+        public int $lifeTime = 0;
+
+        public function __construct(public readonly string $group)
+        {
+        }
+
+        public function setCaching(bool $enabled): void
+        {
+            $this->caching = $enabled;
+        }
+
+        public function setLifeTime(int $minutes): void
+        {
+            $this->lifeTime = $minutes;
+        }
+
+        public function get(string $key): mixed
+        {
+            return $this->items[$key] ?? false;
+        }
+
+        public function store(mixed $value, string $key): bool
+        {
+            $this->items[$key] = $value;
+
+            return true;
+        }
+
+        public function remove(string $key): bool
+        {
+            unset($this->items[$key]);
+
+            return true;
+        }
+
+        public function clean(string $group): bool
+        {
+            self::$cleaned[] = $group;
+            $this->items = [];
+
+            return true;
+        }
+
+        public static function reset(): void
+        {
+            self::$cleaned = [];
+        }
+    }
+
+    /**
      * Minimal stand-in for Joomla's DatabaseDriver. Tests queue the rows that
      * loadObject() should hand back, in call order.
      */
@@ -400,6 +482,16 @@ namespace Joomla\Registry {
 }
 
 namespace Joomla\Database {
+    /**
+     * Declared methods bind every test double, so the interface stays at what the
+     * doubles actually build; the rest of the real query builder is documented so
+     * static analysis still resolves the clauses the component chains.
+     *
+     * @method self delete(?string $table = null)
+     * @method self join(string $type, string $table, ?string $condition = null)
+     * @method self order(array|string $columns)
+     * @method self group(array|string $columns)
+     */
     interface QueryInterface
     {
         public function select(array|string $columns): self;
@@ -421,6 +513,17 @@ namespace Joomla\Database {
         public function __toString(): string;
     }
 
+    /**
+     * The real driver carries the whole load* family, but each method declared here
+     * has to be implemented by every test double, so only the ones a double actually
+     * needs are required. The rest are documented so static analysis still resolves
+     * the calls the component makes against this type.
+     *
+     * @method array       loadColumn(int $offset = 0)
+     * @method object|null loadObject(string $class = \stdClass::class)
+     * @method array|null  loadAssocList(?string $key = null, ?string $column = null)
+     * @method array|null  loadObjectList(string $key = '', string $class = \stdClass::class)
+     */
     interface DatabaseInterface
     {
         public function quoteName(array|string $name, array|string|null $alias = null): array|string;
@@ -469,6 +572,51 @@ namespace Joomla\CMS\Installer {
     if (!class_exists(InstallerAdapter::class)) {
         class InstallerAdapter
         {
+        }
+    }
+
+    /**
+     * The install/uninstall executors drive Joomla's real installer, which needs a booted
+     * CMS and a writable filesystem. These stand-ins exist so the classes resolve; they
+     * throw rather than fake a result, so a test that reaches them fails loudly instead of
+     * reporting an install that never happened. Parameters stay loose because the real
+     * methods are untyped and the executors pass values straight out of the package array.
+     */
+    if (!class_exists(InstallerHelper::class)) {
+        class InstallerHelper
+        {
+            public static function unpack(mixed $packageFilename, bool $alwaysReturnArray = false): array|bool
+            {
+                throw new \RuntimeException('InstallerHelper::unpack() needs a booted Joomla');
+            }
+
+            public static function cleanupInstall(mixed $package, mixed $resultdir): bool
+            {
+                throw new \RuntimeException('InstallerHelper::cleanupInstall() needs a booted Joomla');
+            }
+        }
+    }
+
+    if (!class_exists(Installer::class)) {
+        class Installer
+        {
+            /** Set by install(); the executor reports the extension name from it. */
+            public ?\SimpleXMLElement $manifest = null;
+
+            public static function getInstance(): self
+            {
+                throw new \RuntimeException('Installer::getInstance() needs a booted Joomla');
+            }
+
+            public function install(mixed $path = null): bool
+            {
+                throw new \RuntimeException('Installer::install() needs a booted Joomla');
+            }
+
+            public function uninstall(mixed $type, mixed $identifier): bool
+            {
+                throw new \RuntimeException('Installer::uninstall() needs a booted Joomla');
+            }
         }
     }
 }

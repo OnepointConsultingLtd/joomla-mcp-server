@@ -86,6 +86,12 @@ final class ToolAccessPolicy
         'delete_tag' => ['kind' => self::API, 'component' => null, 'action' => null],
         'list_extensions' => ['kind' => self::DIRECT, 'component' => 'com_installer', 'action' => 'core.manage'],
         'set_extension_state' => ['kind' => self::DIRECT, 'component' => 'com_plugins', 'action' => 'core.edit.state', 'id' => 'extension_id', 'resolve' => 'plugin_extension'],
+        // Site-wide core.admin, not the per-extension mapping set_extension_state uses:
+        // an extension's Options are where secrets live (API keys, SMTP credentials), and
+        // Joomla itself gates the Options screen on core.options for the extension's own
+        // component — which has no asset this catalog can resolve from an #__extensions row.
+        'get_extension_params' => ['kind' => self::DIRECT, 'component' => null, 'action' => 'core.admin'],
+        'update_extension_params' => ['kind' => self::DIRECT, 'component' => null, 'action' => 'core.admin'],
         'uninstall_extension' => ['kind' => self::DIRECT, 'component' => null, 'action' => 'core.admin'],
         'create_menu' => ['kind' => self::API, 'component' => null, 'action' => null],
         'delete_menu_item' => ['kind' => self::API, 'component' => null, 'action' => null],
@@ -95,6 +101,23 @@ final class ToolAccessPolicy
         'get_rendered_page' => ['kind' => self::DIRECT, 'component' => null, 'action' => null, 'special' => 'rendered_page'],
         'seo_audit_articles' => ['kind' => self::API, 'component' => null, 'action' => null],
         'check_internal_links' => ['kind' => self::DIRECT, 'component' => 'com_content', 'action' => 'core.manage'],
+        // com_fields: core routes every one of its six field contexts through the Web
+        // Services API, so these never touch the database and Joomla's own ACL governs them.
+        'list_field_groups' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'update_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'delete_field_group' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'reorder_field_groups' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'list_fields' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'find_field_by_name' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'update_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'delete_field' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'reorder_fields' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'set_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
     ];
 
     /** @return list<string> */

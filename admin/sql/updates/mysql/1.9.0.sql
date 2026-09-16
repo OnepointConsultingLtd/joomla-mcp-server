@@ -1,0 +1,6 @@
+-- 1.9.0 adds the com_fields tool family, which reaches Joomla entirely through the
+-- Web Services API, and the extension params tools, which read and write Joomla's own
+-- #__extensions.params column. Neither stores anything of its own, so there is no
+-- schema change.
+-- The file exists because Joomla applies update SQL by version filename: without it
+-- the 1.9.0 step is missing from the upgrade sequence.

@@ -17,13 +17,23 @@ use Joomla\Registry\Registry;
 class PolicyService
 {
     /**
-     * Tools blocked until an admin explicitly allows them. These grant arbitrary
-     * code execution on the server (extension install/uninstall, PHP template
-     * edits), so they must be opt-in. Mirrors the fail-closed reasoning in
+     * Tools blocked until an admin explicitly allows them. The first three grant
+     * arbitrary code execution on the server (extension install/uninstall, PHP
+     * template edits). The com_fields tools are here for a different reason: they
+     * change the site's content schema rather than its content, and deleting a
+     * field destroys every value stored against it. The extension params tools are
+     * here for a third: an extension's Options are where third-party extensions
+     * keep their secrets, so reading them is a credential disclosure risk and
+     * writing them reconfigures the site. Admins opt in selectively by
+     * removing names from the option. Mirrors the fail-closed reasoning in
      * AuthService: config.xml defaults are only persisted once the options are
      * saved, so the same default must be applied here for fresh installs.
      */
-    private const DEFAULT_DISABLED_TOOLS = 'install_extension uninstall_extension update_template_file';
+    private const DEFAULT_DISABLED_TOOLS = 'install_extension uninstall_extension update_template_file '
+        . 'list_field_groups get_field_group create_field_group update_field_group delete_field_group '
+        . 'reorder_field_groups list_fields get_field find_field_by_name create_field update_field '
+        . 'delete_field reorder_fields get_item_field_values set_item_field_values '
+        . 'get_extension_params update_extension_params';
 
     /**
      * Sentinel the admin enters to explicitly disable nothing. Required because

@@ -74,7 +74,21 @@ class RpcServiceTest extends TestCase
         $registered = array_column($registry->getAll(), 'name');
 
         $this->assertSame($registered, $listed);
-        $this->assertCount(71, $listed);
+        $this->assertCount(88, $listed);
+    }
+
+    public function testSiteHealthReturnsOkAndJoomlaVersion(): void
+    {
+        $service = $this->makeService();
+        $response = $service->handle([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'site_health',
+        ]);
+
+        $this->assertSame('ok', $response['result']['status']);
+        $this->assertSame('5.2.0', $response['result']['joomla_version']);
+        $this->assertNotEmpty($response['result']['timestamp']);
     }
 
     /**
@@ -105,7 +119,7 @@ class RpcServiceTest extends TestCase
 
     public function testCreateArticleStripsContentAliasesAndDefaultsLanguage(): void
     {
-        $captured = null;
+        $captured = [];
         $rest = $this->createRestMock();
         $rest->method('post')->willReturnCallback(
             static function (string $path, array $jsonBody) use (&$captured): array {
@@ -138,7 +152,7 @@ class RpcServiceTest extends TestCase
 
     public function testSearchArticlesSendsFiltersAsJoomlaFilterQueryParams(): void
     {
-        $capturedQuery = null;
+        $capturedQuery = [];
         $rest = $this->createRestMock();
         $rest->method('get')->willReturnCallback(
             static function (string $path, array $query = []) use (&$capturedQuery): array {
@@ -176,7 +190,7 @@ class RpcServiceTest extends TestCase
 
     public function testUpdateMenuItemSendsACompleteMergedPayload(): void
     {
-        $patched = null;
+        $patched = [];
         $rest = $this->createRestMock();
         $rest->method('get')->willReturn([
             'data' => [
@@ -298,7 +312,7 @@ class RpcServiceTest extends TestCase
      */
     private function capturePatchFromUpdateArticle(array $article): array
     {
-        $captured = null;
+        $captured = [];
         $rest = $this->createRestMock();
         $rest->method('patch')->willReturnCallback(
             static function (string $path, array $jsonBody) use (&$captured): array {

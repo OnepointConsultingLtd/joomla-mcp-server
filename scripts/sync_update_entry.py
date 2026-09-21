@@ -9,6 +9,13 @@ Usage:
     sync_update_entry.py <update.xml> <version> [sha256]
 
 Idempotent: re-running with the same arguments leaves the file unchanged.
+
+Every entry carries <changelogurl>, which is what makes the Changelog column in
+Extensions: Update render a link instead of "N/A": Joomla's UpdateAdapter copies
+that element into #__updates.changelogurl, and the view keys the link off that
+column. The <changelogurl> in mcpserver.xml populates a different column
+(#__extensions.changelogurl, which supplies the modal's contents) and does not
+substitute for it.
 """
 
 import re
@@ -22,6 +29,7 @@ ENTRY_TEMPLATE = """    <update>
         <client>administrator</client>
         <version>{version}</version>
         <infourl title="MCP Server for Joomla {version}">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v{version}</infourl>
+        <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
         <downloads>
             <downloadurl type="full" format="zip">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/download/v{version}/com_mcpserver-{version}.zip</downloadurl>
         </downloads>

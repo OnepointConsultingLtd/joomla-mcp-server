@@ -45,7 +45,9 @@ DOTFILE_WHITELIST = {".htaccess"}
 CONSECUTIVE_ESCAPES = re.compile(
     r"(\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,3}))(\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,3}))"
 )
-DOUBLE_QUOTED_STRING = re.compile(r'"((?:\\"|[^"\\]|\\.)*)"')
+# Alternatives must stay mutually exclusive: an escape alternative alongside \\. would
+# let \" match two ways per repetition, i.e. exponential backtracking on an unterminated string.
+DOUBLE_QUOTED_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 RAWURLDECODE_CALL = re.compile(r"\brawurldecode\s*\(")
 
 # Literal replacements for patterns that confuse naive quoted-string scanning (e.g. PHP '').

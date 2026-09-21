@@ -10,6 +10,10 @@ on:
       - master
       - main
 
+# Checkout is the only thing needing the token; nothing here writes back to the repo.
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest

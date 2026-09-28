@@ -12,6 +12,7 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 
 defined('_JEXEC') or die;
 
+use Joomla\CMS\Factory;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
 use Joomla\Component\Mcpserver\Administrator\Service\PromptRegistry;
@@ -26,6 +27,11 @@ use Psr\Log\LoggerInterface;
 
 class RpcServiceDiagnosticsTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        Factory::reset();
+    }
+
     public function testGetRenderedPageBuildsArticlePathFromCatid(): void
     {
         $rest = $this->createRestMock();
@@ -437,6 +443,212 @@ class RpcServiceDiagnosticsTest extends TestCase
         $this->assertSame(1, $result['summary']['external']);
     }
 
+    public function testGetSystemInformationReturnsInfoPhpSettingsAndDirectoryWritability(): void
+    {
+        $this->installSysinfoModel($this->sysinfoModel());
+
+        $result = $this->toolResult($this->callTool($this->makeService(), 'get_system_information', []));
+
+        $this->assertSame(['info', 'php_settings', 'directories'], array_keys($result['data']));
+        $this->assertSame('8.0.36', $result['data']['info']['dbversion']);
+        $this->assertSame('8.2.18', $result['data']['info']['phpversion']);
+        $this->assertSame('256M', $result['data']['php_settings']['memory_limit']);
+        $this->assertSame('xxxxxx', $result['data']['php_settings']['open_basedir']);
+        $this->assertSame([
+            ['name' => 'administrator/components', 'writable' => true],
+            ['name' => 'images', 'writable' => false],
+            ['name' => 'log', 'writable' => true],
+            ['name' => 'tmp', 'writable' => true],
+            ['name' => 'administrator/cache', 'writable' => false],
+        ], $result['data']['directories']);
+    }
+
+    public function testGetSystemInformationRequestsOnlyTheEssentialSectionsWithPublicDirectoryNames(): void
+    {
+        // Config, phpinfo and extensions were scoped out deliberately, and the
+        // non-public directory listing keys log/tmp by absolute server path.
+        $model = $this->sysinfoModel();
+        $this->installSysinfoModel($model);
+
+        $this->toolResult($this->callTool($this->makeService(), 'get_system_information', []));
+
+        $this->assertSame([
+            ['info', true],
+            ['phpSettings', true],
+            ['directory', true],
+        ], $model->requested);
+    }
+
+    public function testGetSystemInformationOmitsTheCallersUserAgent(): void
+    {
+        // Joomla reports the requesting browser's user agent. Through MCP that is
+        // the client's own, which says nothing about the site.
+        $this->installSysinfoModel($this->sysinfoModel());
+
+        $result = $this->toolResult($this->callTool($this->makeService(), 'get_system_information', []));
+
+        $this->assertArrayNotHasKey('useragent', $result['data']['info']);
+    }
+
+    public function testGetSystemInformationNeverReturnsAnAbsoluteDirectoryPath(): void
+    {
+        // Even in its public listing, Joomla keys a custom cache_path by the raw path.
+        $this->installSysinfoModel($this->sysinfoModel([
+            'images' => ['writable' => true, 'message' => ''],
+            '/var/www/private/cache' => ['writable' => false, 'message' => 'COM_ADMIN_CACHE_DIRECTORY'],
+            'D:\\sites\\extra' => ['writable' => true, 'message' => ''],
+        ]));
+
+        $result = $this->toolResult($this->callTool($this->makeService(), 'get_system_information', []));
+
+        $this->assertSame([
+            ['name' => 'images', 'writable' => true],
+            ['name' => 'cache', 'writable' => false],
+        ], $result['data']['directories']);
+    }
+
+    public function testGetSystemInformationSchemaSerialisesItsEmptyPropertiesAsAnObject(): void
+    {
+        // JSON Schema requires properties to be an object; an empty PHP array
+        // would go out as [], which strict MCP clients reject.
+        $tools = array_column((new ToolRegistry())->getAll(), null, 'name');
+
+        $this->assertSame('{}', json_encode($tools['get_system_information']['inputSchema']['properties']));
+    }
+
+    public function testGetSystemInformationRunsInReadOnlyMode(): void
+    {
+        $this->installSysinfoModel($this->sysinfoModel());
+        $service = $this->makeService(null, true);
+
+        $response = $this->callTool($service, 'get_system_information', []);
+
+        $this->assertFalse($service->wasLastCallBlocked());
+        $this->toolResult($response);
+    }
+
+    public function testGetSystemInformationExplainsWhenTheSysinfoModelCannotLoad(): void
+    {
+        $this->installSysinfoModel(null);
+        $service = $this->makeService();
+
+        $response = $this->callTool($service, 'get_system_information', []);
+
+        $this->assertTrue($response['result']['isError']);
+        $this->assertTrue($service->wasLastCallFailed());
+        $this->assertStringContainsString('system information', $response['result']['content'][0]['text']);
+    }
+
+    public function testGetSystemInformationDoesNotRelayJoomlaExceptionMessages(): void
+    {
+        // Both extend RuntimeException, whose messages executors normally pass
+        // through: DirectoryIterator names the absolute path it could not open,
+        // and Joomla's database exceptions carry the failing SQL.
+        $model = $this->sysinfoModel(null, new \UnexpectedValueException(
+            'DirectoryIterator::__construct(/var/www/private/administrator/manifests): Failed to open directory'
+        ));
+        $this->installSysinfoModel($model);
+        $service = $this->makeService();
+
+        $response = $this->callTool($service, 'get_system_information', []);
+
+        $this->assertTrue($response['result']['isError']);
+        $this->assertTrue($service->wasLastCallFailed());
+        $this->assertStringNotContainsString('/var/www', $response['result']['content'][0]['text']);
+    }
+
+    /**
+     * Stands in for com_admin's SysinfoModel after getSafeData() has applied
+     * Joomla's privacy filter, so the values are what core would hand back.
+     *
+     * @param  array<string, array{writable:bool, message:string}>|null  $directories
+     */
+    private function sysinfoModel(?array $directories = null, ?\Throwable $failure = null): object
+    {
+        return new class ($directories, $failure) {
+            /** @var list<array{0:string, 1:bool}> */
+            public array $requested = [];
+
+            public function __construct(private readonly ?array $directories, private readonly ?\Throwable $failure)
+            {
+            }
+
+            public function getSafeData(string $dataType, bool $public = true): array
+            {
+                $this->requested[] = [$dataType, $public];
+                if ($this->failure !== null) {
+                    throw $this->failure;
+                }
+
+                return match ($dataType) {
+                    'info' => [
+                        'php' => 'Linux web01 6.1.0 x86_64',
+                        'dbserver' => 'mysql',
+                        'dbversion' => '8.0.36',
+                        'phpversion' => '8.2.18',
+                        'server' => 'Apache',
+                        'sapi_name' => 'fpm-fcgi',
+                        'version' => 'Joomla! 5.2.0 Stable',
+                        'useragent' => 'claude-desktop/1.0',
+                    ],
+                    'phpSettings' => [
+                        'memory_limit' => '256M',
+                        'upload_max_filesize' => '32M',
+                        'open_basedir' => 'xxxxxx',
+                        'gd' => true,
+                    ],
+                    'directory' => $this->directories ?? [
+                        'administrator/components' => ['writable' => true, 'message' => ''],
+                        'images' => ['writable' => false, 'message' => ''],
+                        'log' => ['writable' => true, 'message' => 'COM_ADMIN_LOG_DIRECTORY'],
+                        'tmp' => ['writable' => true, 'message' => 'COM_ADMIN_TEMP_DIRECTORY'],
+                        'administrator/cache' => ['writable' => false, 'message' => 'COM_ADMIN_CACHE_DIRECTORY'],
+                    ],
+                    default => ['unexpected' => $dataType],
+                };
+            }
+        };
+    }
+
+    private function installSysinfoModel(?object $model): void
+    {
+        $factory = new class ($model) {
+            public function __construct(private readonly ?object $model)
+            {
+            }
+
+            // Like Joomla's MVCFactory, answers null when there is no such model.
+            public function createModel(string $name, string $prefix = '', array $config = []): ?object
+            {
+                return $name === 'Sysinfo' && $prefix === 'Administrator' ? $this->model : null;
+            }
+        };
+
+        Factory::$application = new class ($factory) {
+            public function __construct(private readonly object $factory)
+            {
+            }
+
+            public function bootComponent(string $component): object
+            {
+                if ($component !== 'com_admin') {
+                    throw new \RuntimeException('Unexpected component ' . $component);
+                }
+
+                return new class ($this->factory) {
+                    public function __construct(private readonly object $factory)
+                    {
+                    }
+
+                    public function getMVCFactory(): object
+                    {
+                        return $this->factory;
+                    }
+                };
+            }
+        };
+    }
+
     /**
      * @return RestClient&MockObject
      */
@@ -445,11 +657,11 @@ class RpcServiceDiagnosticsTest extends TestCase
         return $this->createMock(RestClient::class);
     }
 
-    private function makeService(?RestClient $rest = null): RpcService
+    private function makeService(?RestClient $rest = null, bool $readOnly = false): RpcService
     {
         $policy = $this->createMock(PolicyService::class);
         $policy->method('isToolAllowed')->willReturn(true);
-        $policy->method('isReadOnly')->willReturn(false);
+        $policy->method('isReadOnly')->willReturn($readOnly);
         $policy->method('resourcesEnabled')->willReturn(false);
         $policy->method('promptsEnabled')->willReturn(false);
 

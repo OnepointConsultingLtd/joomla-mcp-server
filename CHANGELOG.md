@@ -2,6 +2,11 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## Unreleased
+
+- Added `get_system_information`, which returns the essentials of Joomla's System Information page: Joomla, PHP, database and web server versions, PHP limits and required extensions, and whether each core directory, the cache, log and tmp folders are writable.
+- `get_system_information` requires site-wide `core.admin` in Governed Mode, matching Joomla, which serves System Information to Super Users only.
+
 ## 1.9.0 - 2026-09-15
 
 - Added 15 custom field tools covering the full lifecycle of `com_fields`: `list_fields`, `get_field`, `find_field_by_name`, `create_field`, `update_field`, `delete_field` and `reorder_fields` for field definitions; `list_field_groups`, `get_field_group`, `create_field_group`, `update_field_group`, `delete_field_group` and `reorder_field_groups` for the tabs fields are organised into; and `get_item_field_values` / `set_item_field_values` for the values stored on an individual article, category, contact or user. Creating or configuring a field previously meant a manual round-trip through the administrator, and resolving a field's ID from its technical name meant querying `#__fields` with raw SQL.

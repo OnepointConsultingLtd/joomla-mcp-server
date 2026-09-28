@@ -18,7 +18,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 88 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 89 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -195,8 +195,9 @@ Both are **disabled by default**, for a third reason than the code-execution and
 | `get_rendered_page` | Fetch the HTML a guest visitor sees for an article or menu item (anonymous request, 512 KB cap, 30 s timeout) |
 | `seo_audit_articles` | Audit published articles for missing titles, missing/short/long metadesc, and duplicate aliases in the same category |
 | `check_internal_links` | Resolve article hyperlinks offline against published/unpublished articles and menu paths; external links are never probed |
+| `get_system_information` | Joomla, PHP, database and web server versions, PHP limits and required extensions, and which core directories are writable — redacted by Joomla's own privacy filter |
 
-`get_rendered_page` fetches the public site as an anonymous visitor so the result matches what a guest actually sees after the template and content plugins run. `check_internal_links` never issues HTTP requests for external URLs. `seo_audit_articles` does not inspect `metakey` — Joomla stopped using keyword meta tags in 2009.
+`get_rendered_page` fetches the public site as an anonymous visitor so the result matches what a guest actually sees after the template and content plugins run. `check_internal_links` never issues HTTP requests for external URLs. `seo_audit_articles` does not inspect `metakey` — Joomla stopped using keyword meta tags in 2009. `get_system_information` returns only the essentials of System Information, never the global configuration or phpinfo, and requires `core.admin` in Governed Mode just as Joomla's own screen does.
 
 ### Custom fields
 

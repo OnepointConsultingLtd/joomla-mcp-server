@@ -1889,6 +1889,22 @@ class ToolRegistry
         ]);
 
         $this->register([
+            'name' => 'get_system_information',
+            'description' => 'Get the essentials of Joomla\'s System Information page for diagnosing the site: Joomla, PHP, database and web server versions (info), PHP limits and required extensions such as memory_limit, upload_max_filesize, gd and zip (php_settings), and whether each core directory, the cache, log and tmp folders are writable (directories). Private values are redacted as "xxxxxx" by Joomla\'s own privacy filter, the one it applies to its downloadable report. Global configuration, phpinfo and the extension list are not included; use list_extensions for installed extensions.',
+            'inputSchema' => [
+                'type' => 'object',
+                // An object, not [], so tools/list serialises it as {}.
+                'properties' => new \stdClass(),
+            ],
+            'annotations' => [
+                'title' => 'Get System Information',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => false,
+            ],
+        ]);
+
+        $this->register([
             'name' => 'list_field_groups',
             'description' => 'List custom field groups (the tabs that custom fields are organised into) for a Joomla field context. Call this before create_field or update_field to discover valid group_id values.',
             'inputSchema' => [

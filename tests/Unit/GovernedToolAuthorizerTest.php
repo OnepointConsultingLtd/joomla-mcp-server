@@ -37,7 +37,7 @@ final class GovernedToolAuthorizerTest extends TestCase
         $registered = array_column((new ToolRegistry())->getAll(), 'name');
 
         $this->assertSame($registered, $catalog->toolNames());
-        $this->assertCount(88, $catalog->toolNames());
+        $this->assertCount(89, $catalog->toolNames());
     }
 
     public function testDeniedDirectCallDoesNotExecute(): void
@@ -512,6 +512,8 @@ final class GovernedToolAuthorizerTest extends TestCase
             'create_template_override' => ['create_template_override'],
             'list_template_files' => ['list_template_files'],
             'get_template_file' => ['get_template_file'],
+            // Joomla gates System Information on core.admin itself.
+            'get_system_information' => ['get_system_information'],
         ];
     }
 

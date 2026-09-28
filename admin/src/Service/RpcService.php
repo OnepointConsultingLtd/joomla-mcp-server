@@ -198,6 +198,7 @@ class RpcService
             'get_rendered_page'             => fn(array $p) => $this->getRenderedPage($p),
             'seo_audit_articles'            => fn(array $p) => $this->seoAuditArticles($p),
             'check_internal_links'          => fn(array $p) => $this->checkInternalLinks($p),
+            'get_system_information'        => fn(array $p) => $this->getSystemInformation(),
             'list_field_groups'             => fn(array $p) => $this->listFieldGroups($p),
             'get_field_group'               => fn(array $p) => $this->getFieldGroup($p),
             'create_field_group'            => fn(array $p) => $this->createFieldGroup($p),
@@ -4117,6 +4118,65 @@ class RpcService
         if ($alias !== '') {
             $aliases[$alias] = $id;
         }
+    }
+
+    /**
+     * Reads through SysinfoModel::getSafeData(), the privacy filter behind
+     * Joomla's downloadable System Information report, so which values are
+     * redacted stays Joomla's decision rather than a second list kept here.
+     * Configuration, phpinfo and extensions are left out on purpose.
+     */
+    private function getSystemInformation(): array
+    {
+        $model = Factory::getApplication()->bootComponent('com_admin')
+            ->getMVCFactory()
+            ->createModel('Sysinfo', 'Administrator', ['ignore_request' => true]);
+
+        if (!\is_object($model)) {
+            throw new \RuntimeException('Unable to load the Joomla system information model');
+        }
+
+        try {
+            $info = $model->getSafeData('info');
+            $phpSettings = $model->getSafeData('phpSettings');
+            // true selects the listing Joomla shares publicly, which names the
+            // log and tmp folders instead of giving their absolute paths.
+            $directoryStates = $model->getSafeData('directory', true);
+        } catch (\Throwable $e) {
+            // What fails in here are RuntimeExceptions naming an absolute path
+            // (DirectoryIterator on a missing folder) or SQL (the database
+            // driver), and the tool-call handler relays RuntimeException
+            // messages to the caller verbatim. Keep the detail in the log.
+            $this->logger->error('Reading Joomla system information failed', ['error' => $e->getMessage()]);
+
+            throw new \RuntimeException('Joomla could not read its system information', 0, $e);
+        }
+
+        // Joomla reports the requesting browser's user agent. Through MCP that
+        // is the client's own, which says nothing about the site.
+        unset($info['useragent']);
+
+        $directories = [];
+        foreach ($directoryStates as $name => $state) {
+            $name = (string) $name;
+            // Even that listing keys a custom cache_path by its absolute path.
+            if (preg_match('#^(?:[/\\\\]|[A-Za-z]:)#', $name) === 1) {
+                if (($state['message'] ?? '') !== 'COM_ADMIN_CACHE_DIRECTORY') {
+                    continue;
+                }
+                $name = 'cache';
+            }
+
+            $directories[] = ['name' => $name, 'writable' => (bool) ($state['writable'] ?? false)];
+        }
+
+        return [
+            'data' => [
+                'info'         => $info,
+                'php_settings' => $phpSettings,
+                'directories'  => $directories,
+            ],
+        ];
     }
 
     private function listArticleAssociations(array $params): array

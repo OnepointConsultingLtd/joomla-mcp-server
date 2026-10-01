@@ -372,6 +372,7 @@ class McpHttpTransportTest extends TestCase
             'decimal spelling' => [['id' => 5], ['mcp-param-id' => '5.0']],
             'leading space' => [['id' => 5], ['mcp-param-id' => ' 5']],
             'numeric string argument' => [['id' => '5'], ['mcp-param-id' => '5']],
+            'integral float argument' => [['id' => 5.0], ['mcp-param-id' => '5']],
             'base64 sentinel' => [['id' => 5], ['mcp-param-id' => '=?base64?NQ==?=']],
             'absent value, no header' => [[], []],
             'null value, no header' => [['id' => null], []],
@@ -398,6 +399,9 @@ class McpHttpTransportTest extends TestCase
             'different number' => [['id' => 5], ['mcp-param-id' => '6'], 'Mcp-Param-Id'],
             'not a number' => [['id' => 5], ['mcp-param-id' => 'five'], 'Mcp-Param-Id'],
             'header for an absent value' => [[], ['mcp-param-id' => '5'], 'absent'],
+            // Floats cannot tell these apart; the digits can.
+            'beyond float precision' => [['id' => 9007199254740993], ['mcp-param-id' => '9007199254740992'], 'Mcp-Param-Id'],
+            'exponent form' => [['id' => 10], ['mcp-param-id' => '1e1'], 'Mcp-Param-Id'],
             'invalid characters' => [['id' => 5], ['mcp-param-id' => "5\xC3\xA9"], 'invalid characters'],
         ];
     }

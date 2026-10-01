@@ -72,15 +72,16 @@ final class HttpProgressSink implements ProgressSink
     }
 
     /**
-     * End the stream with the response — unless the client already left, in
-     * which case nothing more may be sent for the request.
+     * End the stream with any queued stream notifications and the response —
+     * unless the client already left, in which case nothing more may be sent.
      *
-     * @param  array<string, mixed>  $response
+     * @param  array<string, mixed>        $response
+     * @param  list<array<string, mixed>>  $notifications
      */
-    public function finish(array $response): void
+    public function finish(array $response, array $notifications = []): void
     {
         if ($this->started && !($this->aborted)()) {
-            ($this->write)(McpHttpTransport::sseFrames([$response]));
+            ($this->write)(McpHttpTransport::sseFrames([...$notifications, $response]));
         }
     }
 }

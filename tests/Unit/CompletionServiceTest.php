@@ -50,6 +50,11 @@ class CompletionServiceTest extends TestCase
         $this->assertSame(['x'], CompletionService::complete(['x', '', 'x'], '')['values']);
     }
 
+    public function testCaseVariantsCollapseToTheFirstSpelling(): void
+    {
+        $this->assertSame(['News'], CompletionService::complete(['News', 'news', 'NEWS'], '')['values']);
+    }
+
     public function testWildcardCharactersMatchLiterally(): void
     {
         $this->assertSame(['100% organic'], CompletionService::complete(['100% organic', '100 percent'], '100%')['values']);

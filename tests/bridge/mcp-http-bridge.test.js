@@ -320,9 +320,11 @@ test('an unknown schema is learned once on HeaderMismatch and the call retried',
             }
         },
         async (bridge, output, received) => {
-            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'get_article_by_id', arguments: { id: 5 }, _meta: MODERN_META } }));
+            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'get_article_by_id', arguments: { id: 5 }, _meta: { ...MODERN_META, progressToken: 'p' } } }));
 
             assert.deepEqual(received.map((entry) => entry.body.method), ['tools/call', 'tools/list', 'tools/call']);
+            assert.equal(received[1].body.params._meta['io.modelcontextprotocol/protocolVersion'], '2026-07-28');
+            assert.equal(received[1].body.params._meta.progressToken, undefined, 'the refresh is not the call: it carries only protocol metadata');
             assert.equal(output.length, 1, 'only the retried call answers the client');
             assert.equal(output[0].id, 9, 'under the id the client used');
             assert.equal(output[0].result.ok, true);

@@ -48,6 +48,17 @@ class RpcServiceProgressTest extends TestCase
         );
     }
 
+    public function testTheLastPageIsReportedEvenWithoutAPageCount(): void
+    {
+        $sink = new RecordingProgressSink();
+        $service = $this->makeService($this->pagedRest(3, withTotal: false));
+        $service->setProgressSink($sink, static fn (): float => 0.0);
+
+        $service->handle($this->callTool('list_custom_modules', [], 'tok'));
+
+        $this->assertSame([1.0, 3.0], array_column(array_column($sink->sent, 'params'), 'progress'), 'first page, then the last page with data');
+    }
+
     public function testADisconnectStopsTheWorkAndMarksTheCallFailed(): void
     {
         $service = $this->makeService($this->pagedRest(3));
@@ -120,14 +131,15 @@ class RpcServiceProgressTest extends TestCase
      *
      * @return RestClient&MockObject
      */
-    private function pagedRest(int $pages): RestClient
+    private function pagedRest(int $pages, bool $withTotal = true): RestClient
     {
         $rest = $this->createMock(RestClient::class);
-        $rest->method('get')->willReturnCallback(function (string $path, array $query = []) use ($pages): array {
+        $rest->method('get')->willReturnCallback(function (string $path, array $query = []) use ($pages, $withTotal): array {
             $this->gets++;
             $page = intdiv((int) ($query['page[offset]'] ?? 0), 100);
+            $meta = $withTotal ? ['total-pages' => $pages] : [];
             if ($page >= $pages) {
-                return ['data' => [], 'meta' => ['total-pages' => $pages]];
+                return ['data' => [], 'meta' => $meta];
             }
 
             return [
@@ -135,7 +147,7 @@ class RpcServiceProgressTest extends TestCase
                     static fn (int $n): array => ['type' => 'modules', 'id' => $page * 100 + $n, 'attributes' => ['module' => 'mod_custom']],
                     range(1, 100)
                 ),
-                'meta' => ['total-pages' => $pages],
+                'meta' => $meta,
             ];
         });
 

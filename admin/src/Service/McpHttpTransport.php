@@ -56,9 +56,8 @@ final class McpHttpTransport
      * Precedence is deliberate: an unsupported version (header, then body) is
      * reported before any mismatch, because the client can recover from it by
      * retrying with a version from `supported`; a mismatch it can only fix by
-     * repairing itself. Mcp-Param-* headers are not checked: they are only
-     * defined for tool parameters annotated with x-mcp-header, and no tool here
-     * declares one.
+     * repairing itself. Mcp-Param-* headers depend on the called tool's schema
+     * and are checked separately, by validateParamHeaders().
      *
      * @param  array<string, mixed>   $request
      * @param  array<string, string>  $headers  lowercase header name => value
@@ -215,11 +214,19 @@ final class McpHttpTransport
 
     /**
      * Numbers compare numerically, so "5", "05" and "5.0" all name argument 5.
+     * Integers compare as digits rather than floats: a float cannot tell IDs
+     * above 2^53 apart, and would let "1e1" stand for 10.
      */
     private static function sameParamValue(mixed $value, string $header): bool
     {
         if (is_bool($value)) {
             return $header === ($value ? 'true' : 'false');
+        }
+
+        $valueDigits = self::integerDigits($value);
+        $headerDigits = self::integerDigits($header);
+        if ($valueDigits !== null || $headerDigits !== null) {
+            return $valueDigits !== null && $valueDigits === $headerDigits;
         }
 
         if ((is_int($value) || is_float($value) || is_string($value)) && is_numeric($value) && is_numeric($header)) {
@@ -319,6 +326,26 @@ final class McpHttpTransport
         }
 
         return $httpStatus === 400 ? 'invalid_request' : 'error';
+    }
+
+    /**
+     * The canonical digits of an integer spelled with optional spaces, sign,
+     * leading zeros and a zero fraction ("-007.0" => "-7"); null otherwise.
+     */
+    private static function integerDigits(mixed $value): ?string
+    {
+        if (is_int($value)) {
+            return (string) $value;
+        }
+        // JSON decodes 5.0 as a float; within the safe range it is still integer 5.
+        if (is_float($value) && floor($value) === $value && abs($value) <= 9007199254740991) {
+            return (string) (int) $value;
+        }
+        if (!is_string($value) || preg_match('/^\s*([+-]?)0*(\d+?)(?:\.0*)?\s*$/', $value, $m) !== 1) {
+            return null;
+        }
+
+        return ($m[2] === '0' || $m[1] !== '-' ? '' : '-') . $m[2];
     }
 
     /**

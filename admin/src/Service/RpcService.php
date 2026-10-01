@@ -35,7 +35,11 @@ class RpcService
 
     private const COMPLETION_VALUE_MAX_LENGTH = 200;
 
-    /** Pages of articles scanned for ID completion: newest-first, up to 1000 IDs. */
+    /**
+     * Pages of articles scanned for ID completion: newest-first, up to 1000 IDs.
+     * The first completion in a cache period costs up to this many API calls;
+     * fewer pages would hide older IDs from completion altogether.
+     */
     private const COMPLETION_ARTICLE_PAGES = 10;
 
     private const SERVER_TITLE = 'MCP Server for Joomla';
@@ -332,9 +336,9 @@ class RpcService
      *
      * @throws ProgressCancelled
      */
-    private function reportProgress(float $progress, ?float $total = null, ?string $message = null): void
+    private function reportProgress(float $progress, ?float $total = null, ?string $message = null, bool $final = false): void
     {
-        $this->progress?->report($progress, $total, $message);
+        $this->progress?->report($progress, $total, $message, $final);
     }
 
     /**
@@ -2057,6 +2061,7 @@ class RpcService
         $items = [];
         $offset = 0;
         $totalPages = null;
+        $pagesWithData = 0;
 
         for ($page = 0; $page < $maxPages; $page++) {
             $response = $this->rest->get($path, array_merge($query, [
@@ -2074,6 +2079,7 @@ class RpcService
             }
 
             $items = array_merge($items, array_values($data));
+            $pagesWithData++;
 
             // Every caller fetches before it writes, so stopping here never
             // abandons a half-done change.
@@ -2089,6 +2095,17 @@ class RpcService
             if ($count < $pageSize) {
                 break;
             }
+        }
+
+        // Without a page count the walk only learns its last page after the fact,
+        // and the throttle may have swallowed it; this repeats nothing already sent.
+        if ($pagesWithData > 0) {
+            $this->reportProgress(
+                $pagesWithData,
+                $totalPages !== null ? (float) $totalPages : null,
+                'Fetched page ' . $pagesWithData . ($totalPages !== null ? ' of ' . $totalPages : ''),
+                true
+            );
         }
 
         return $items;

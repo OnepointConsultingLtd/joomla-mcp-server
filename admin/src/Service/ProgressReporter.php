@@ -37,7 +37,7 @@ final class ProgressReporter
     /**
      * @throws ProgressCancelled when the client has disconnected
      */
-    public function report(float $progress, ?float $total = null, ?string $message = null): void
+    public function report(float $progress, ?float $total = null, ?string $message = null, bool $final = false): void
     {
         // The spec requires progress to increase with every notification.
         if ($this->last !== null && $progress <= $this->last) {
@@ -45,7 +45,8 @@ final class ProgressReporter
         }
 
         $now = ($this->clock)();
-        $final = $total !== null && $progress >= $total;
+        // The last point always goes out, so the client sees where the work ended.
+        $final = $final || ($total !== null && $progress >= $total);
         if (!$final && $this->lastSentAt !== null && $now - $this->lastSentAt < $this->minIntervalSeconds) {
             return;
         }

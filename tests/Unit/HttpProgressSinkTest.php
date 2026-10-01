@@ -37,6 +37,18 @@ class HttpProgressSinkTest extends TestCase
         $this->assertTrue($sink->hasStarted());
     }
 
+    public function testQueuedStreamNotificationsPrecedeTheResponse(): void
+    {
+        $sink = $this->sink();
+        $sink->send(['jsonrpc' => '2.0', 'method' => 'notifications/progress', 'params' => []]);
+
+        $sink->finish(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], [['jsonrpc' => '2.0', 'method' => 'notifications/subscriptions/acknowledged', 'params' => []]]);
+
+        $ack = strpos($this->written, 'notifications/subscriptions/acknowledged');
+        $this->assertNotFalse($ack, 'queued notifications must not be dropped');
+        $this->assertLessThan(strpos($this->written, '"id":1'), $ack);
+    }
+
     public function testNothingIsWrittenAfterTheClientLeft(): void
     {
         $sink = $this->sink();

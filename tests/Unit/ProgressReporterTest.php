@@ -57,6 +57,17 @@ class ProgressReporterTest extends TestCase
         $this->assertCount(2, $sink->sent);
     }
 
+    public function testAFinalReportBypassesTheThrottleWhenTheTotalIsUnknown(): void
+    {
+        $sink = new RecordingProgressSink();
+        $reporter = $this->reporter($sink);
+
+        $reporter->report(1);
+        $reporter->report(2, null, null, true);
+
+        $this->assertCount(2, $sink->sent);
+    }
+
     public function testProgressNeverGoesBackwards(): void
     {
         $sink = new RecordingProgressSink();

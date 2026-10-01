@@ -30,13 +30,21 @@ final class CompletionService
         $needle = mb_strtolower($typed);
         $prefix = [];
         $contains = [];
+        $seen = [];
 
-        foreach (array_unique($candidates) as $candidate) {
+        foreach ($candidates as $candidate) {
             if (!is_string($candidate) || $candidate === '') {
                 continue;
             }
 
+            // Matching ignores case, so case variants are one suggestion: the
+            // first spelling seen wins.
             $haystack = mb_strtolower($candidate);
+            if (isset($seen[$haystack])) {
+                continue;
+            }
+            $seen[$haystack] = true;
+
             if ($needle === '' || str_starts_with($haystack, $needle)) {
                 $prefix[] = $candidate;
             } elseif (str_contains($haystack, $needle)) {

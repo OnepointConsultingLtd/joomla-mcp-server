@@ -321,10 +321,12 @@ trait RpcHandlerTrait
         $progressSink = empty($sessionId) ? $this->createProgressSink() : null;
         $rpcService->setProgressSink($progressSink);
 
-        [$response, $dispatchFailed] = $this->dispatchToService($rpcService, $request, $method);
-
-        // The container's shared RpcService outlives this request.
-        $rpcService->setProgressSink(null);
+        try {
+            [$response, $dispatchFailed] = $this->dispatchToService($rpcService, $request, $method);
+        } finally {
+            // The container's shared RpcService outlives this request.
+            $rpcService->setProgressSink(null);
+        }
         $streamNotifications = $rpcService->takeStreamNotifications();
 
         // Policy denials (disabled tool, read-only mode) and tool execution
@@ -381,7 +383,7 @@ trait RpcHandlerTrait
 
         if ($progressSink?->hasStarted() === true) {
             // The response joins the progress already streamed, unless the client left.
-            $progressSink->finish($response);
+            $progressSink->finish($response, $streamNotifications);
             $app->close();
             return;
         }

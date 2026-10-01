@@ -91,6 +91,22 @@ function buildMcpHeaders(message, negotiatedVersion, paramHeaders = new Map()) {
 }
 
 /**
+ * Only the per-request protocol keys of a _meta object: a request the bridge
+ * makes on a call's behalf must not inherit the call's own progress token.
+ */
+function protocolMeta(meta) {
+    const keys = ['io.modelcontextprotocol/protocolVersion', 'io.modelcontextprotocol/clientCapabilities', 'io.modelcontextprotocol/clientInfo'];
+    const picked = {};
+    for (const key of keys) {
+        if (meta && key in meta) {
+            picked[key] = meta[key];
+        }
+    }
+
+    return picked;
+}
+
+/**
  * Tool name → [[property, header]] from a tools/list result's x-mcp-header
  * annotations, so tools/call can mirror those arguments into Mcp-Param-* headers.
  */
@@ -362,7 +378,7 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
             const mismatch = responses.some((r) => r && r.error && r.error.code === -32020);
             if (method === 'tools/call' && mismatch && !toolParamHeaders.has(params?.name)) {
                 const listed = await fetchAllListPages(
-                    { jsonrpc: '2.0', id: `${requestId}-tools`, method: 'tools/list', params: { _meta: params?._meta } },
+                    { jsonrpc: '2.0', id: `${requestId}-tools`, method: 'tools/list', params: { _meta: protocolMeta(params?._meta) } },
                     'tools',
                     flight
                 );

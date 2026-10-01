@@ -170,6 +170,66 @@ final class McpHttpTransport
     }
 
     /**
+     * Mirror check for tool parameters annotated x-mcp-header (2026-07-28). The
+     * header and the argument must agree: a gateway may have routed on the one
+     * while this server acts on the other. Legacy requests carry no such headers.
+     *
+     * @param  array<string, mixed>   $request
+     * @param  array<string, string>  $headers       lowercase header name => value
+     * @param  array<string, string>  $paramHeaders  property => header name (ToolRegistry::paramHeaders())
+     *
+     * @throws McpProtocolError
+     */
+    public static function validateParamHeaders(array $request, array $headers, array $paramHeaders): void
+    {
+        if (($request['method'] ?? null) !== 'tools/call'
+            || !array_key_exists('id', $request)
+            || !McpProtocol::isModernRequest($request)
+        ) {
+            return;
+        }
+
+        $params = is_array($request['params'] ?? null) ? $request['params'] : [];
+        $arguments = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
+
+        foreach ($paramHeaders as $property => $name) {
+            $header = $headers['mcp-param-' . strtolower($name)] ?? null;
+            $value = $arguments[$property] ?? null;
+
+            if ($value === null) {
+                if ($header !== null) {
+                    throw self::mismatch("Mcp-Param-{$name} header sent, but params.arguments.{$property} is absent");
+                }
+                continue;
+            }
+
+            if ($header === null) {
+                throw self::mismatch("Missing Mcp-Param-{$name} header for params.arguments.{$property}");
+            }
+
+            if (!self::sameParamValue($value, self::decodeHeaderValue("Mcp-Param-{$name}", $header))) {
+                throw self::mismatch("Header mismatch: Mcp-Param-{$name} header does not match params.arguments.{$property}");
+            }
+        }
+    }
+
+    /**
+     * Numbers compare numerically, so "5", "05" and "5.0" all name argument 5.
+     */
+    private static function sameParamValue(mixed $value, string $header): bool
+    {
+        if (is_bool($value)) {
+            return $header === ($value ? 'true' : 'false');
+        }
+
+        if ((is_int($value) || is_float($value) || is_string($value)) && is_numeric($value) && is_numeric($header)) {
+            return (float) $value === (float) $header;
+        }
+
+        return is_scalar($value) && (string) $value === $header;
+    }
+
+    /**
      * Only legacy clients may batch. 2026-07-28 forbids it, and a batch mixing
      * in a modern request cannot be validated against per-request headers, so
      * the whole body is rejected.

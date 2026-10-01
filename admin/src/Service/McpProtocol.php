@@ -177,7 +177,8 @@ final class McpProtocol
         $result['resultType'] ??= 'complete';
 
         $meta = is_array($result['_meta'] ?? null) ? $result['_meta'] : [];
-        $meta[self::META_SERVER_INFO] = $serverInfo;
+        // A result may already carry the fuller identity (server/discover does).
+        $meta[self::META_SERVER_INFO] ??= $serverInfo;
         $result['_meta'] = $meta;
 
         if (in_array($method, self::PUBLIC_CACHEABLE_METHODS, true)) {

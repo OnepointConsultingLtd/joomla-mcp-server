@@ -356,6 +356,62 @@ class McpHttpTransportTest extends TestCase
         );
     }
 
+    #[DataProvider('acceptedParamHeaders')]
+    public function testMatchingParamHeadersPass(array $arguments, array $headers): void
+    {
+        $this->expectNotToPerformAssertions();
+
+        McpHttpTransport::validateParamHeaders(self::modernRequest('tools/call', ['name' => 'get_article_by_id', 'arguments' => $arguments]), $headers, ['id' => 'Id']);
+    }
+
+    public static function acceptedParamHeaders(): array
+    {
+        return [
+            'exact' => [['id' => 5], ['mcp-param-id' => '5']],
+            'leading zero' => [['id' => 5], ['mcp-param-id' => '05']],
+            'decimal spelling' => [['id' => 5], ['mcp-param-id' => '5.0']],
+            'leading space' => [['id' => 5], ['mcp-param-id' => ' 5']],
+            'numeric string argument' => [['id' => '5'], ['mcp-param-id' => '5']],
+            'base64 sentinel' => [['id' => 5], ['mcp-param-id' => '=?base64?NQ==?=']],
+            'absent value, no header' => [[], []],
+            'null value, no header' => [['id' => null], []],
+        ];
+    }
+
+    #[DataProvider('rejectedParamHeaders')]
+    public function testMismatchedParamHeadersAreRejected(array $arguments, array $headers, string $fragment): void
+    {
+        try {
+            McpHttpTransport::validateParamHeaders(self::modernRequest('tools/call', ['name' => 'get_article_by_id', 'arguments' => $arguments]), $headers, ['id' => 'Id']);
+            $this->fail('Expected a header mismatch');
+        } catch (McpProtocolError $error) {
+            $this->assertSame(JsonRpc::HEADER_MISMATCH, $error->jsonRpcCode);
+            $this->assertSame(400, $error->httpStatus);
+            $this->assertStringContainsString($fragment, $error->getMessage());
+        }
+    }
+
+    public static function rejectedParamHeaders(): array
+    {
+        return [
+            'missing header' => [['id' => 5], [], 'Missing Mcp-Param-Id'],
+            'different number' => [['id' => 5], ['mcp-param-id' => '6'], 'Mcp-Param-Id'],
+            'not a number' => [['id' => 5], ['mcp-param-id' => 'five'], 'Mcp-Param-Id'],
+            'header for an absent value' => [[], ['mcp-param-id' => '5'], 'absent'],
+            'invalid characters' => [['id' => 5], ['mcp-param-id' => "5\xC3\xA9"], 'invalid characters'],
+        ];
+    }
+
+    public function testParamHeadersAreOnlyCheckedOnModernToolCalls(): void
+    {
+        $this->expectNotToPerformAssertions();
+
+        // Legacy request: no _meta version.
+        McpHttpTransport::validateParamHeaders(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'x', 'arguments' => ['id' => 5]]], [], ['id' => 'Id']);
+        // Not a tools/call.
+        McpHttpTransport::validateParamHeaders(self::modernRequest('tools/list'), [], ['id' => 'Id']);
+    }
+
     /**
      * @return array<string, mixed>
      */

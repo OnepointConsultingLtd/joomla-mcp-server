@@ -60,7 +60,7 @@ function encodeHeaderValue(value) {
  * declares (or, for a legacy client, the one initialize negotiated), its
  * method, and its name or URI where the method has one.
  */
-function buildMcpHeaders(message, negotiatedVersion) {
+function buildMcpHeaders(message, negotiatedVersion, paramHeaders = new Map()) {
     const headers = {};
     const params = message && typeof message.params === 'object' && message.params !== null ? message.params : {};
     const meta = typeof params._meta === 'object' && params._meta !== null ? params._meta : {};
@@ -77,7 +77,40 @@ function buildMcpHeaders(message, negotiatedVersion) {
         headers['Mcp-Name'] = encodeHeaderValue(params[nameField]);
     }
 
+    if (message.method === 'tools/call' && typeof params.name === 'string') {
+        const args = params.arguments && typeof params.arguments === 'object' ? params.arguments : {};
+        for (const [property, header] of paramHeaders.get(params.name) || []) {
+            const value = args[property];
+            if (value !== undefined && value !== null) {
+                headers[`Mcp-Param-${header}`] = encodeHeaderValue(String(value));
+            }
+        }
+    }
+
     return headers;
+}
+
+/**
+ * Tool name → [[property, header]] from a tools/list result's x-mcp-header
+ * annotations, so tools/call can mirror those arguments into Mcp-Param-* headers.
+ */
+function paramHeadersFromTools(tools) {
+    const map = new Map();
+    for (const tool of Array.isArray(tools) ? tools : []) {
+        if (!tool || typeof tool.name !== 'string') {
+            continue;
+        }
+        const properties = tool.inputSchema && typeof tool.inputSchema.properties === 'object' ? tool.inputSchema.properties : {};
+        const pairs = [];
+        for (const [property, schema] of Object.entries(properties || {})) {
+            if (schema && typeof schema['x-mcp-header'] === 'string') {
+                pairs.push([property, schema['x-mcp-header']]);
+            }
+        }
+        map.set(tool.name, pairs);
+    }
+
+    return map;
 }
 
 /**
@@ -108,13 +141,14 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
     // stdio request id → { cancelled, req }: on Streamable HTTP, closing the
     // request's connection is the cancellation signal.
     const inFlight = new Map();
+    const toolParamHeaders = new Map();
 
     /**
      * POST one message and resolve with every JSON-RPC message the server
      * answered with: none for an accepted notification, several for an SSE
      * stream, otherwise one.
      */
-    function post(message, flight) {
+    function post(message, flight, onNotification = null) {
         return new Promise((resolve, reject) => {
             const url = new URL(endpoint);
             const isHttps = url.protocol === 'https:';
@@ -130,7 +164,7 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
                     'Content-Type': 'application/json',
                     'Content-Length': Buffer.byteLength(payload),
                     'Accept': 'application/json, text/event-stream',
-                    ...buildMcpHeaders(message, negotiatedVersion),
+                    ...buildMcpHeaders(message, negotiatedVersion, toolParamHeaders),
                 },
                 rejectUnauthorized: rejectUnauthorized
             };
@@ -140,20 +174,58 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
             }
 
             const req = client.request(options, (res) => {
-                let data = '';
                 res.setEncoding('utf8');
-                res.on('data', (chunk) => data += chunk);
-                res.on('end', () => {
-                    if ((res.statusCode === 202 || res.statusCode === 204) && data.trim() === '') {
-                        resolve([]);
+                const streaming = String(res.headers['content-type'] || '').startsWith('text/event-stream');
+                const messages = [];
+                let data = '';
+                let pending = '';
+                let failure = null;
+
+                // Each complete event is handled as it arrives: progress must reach
+                // the client live, not when the stream ends.
+                const deliver = (event) => {
+                    for (const parsed of parseSseMessages(event)) {
+                        messages.push(parsed);
+                        if (onNotification && !('id' in parsed)) {
+                            onNotification(parsed);
+                        }
+                    }
+                };
+
+                res.on('data', (chunk) => {
+                    if (!streaming) {
+                        data += chunk;
                         return;
                     }
-                    if (String(res.headers['content-type'] || '').startsWith('text/event-stream')) {
+                    pending += chunk;
+                    const events = pending.split(/\r?\n\r?\n/);
+                    pending = events.pop();
+                    try {
+                        events.forEach(deliver);
+                    } catch (error) {
+                        failure = failure || error;
+                    }
+                });
+
+                res.on('end', () => {
+                    if (streaming) {
                         try {
-                            resolve(parseSseMessages(data));
+                            if (pending.trim() !== '') {
+                                deliver(pending);
+                            }
                         } catch (error) {
-                            reject(new Error(`Invalid event stream (HTTP ${res.statusCode}): ${error.message}`));
+                            failure = failure || error;
                         }
+                        if (failure) {
+                            reject(new Error(`Invalid event stream (HTTP ${res.statusCode}): ${failure.message}`));
+                            return;
+                        }
+                        // Notifications already went out; hand back what remains.
+                        resolve(onNotification ? messages.filter((m) => 'id' in m) : messages);
+                        return;
+                    }
+                    if ((res.statusCode === 202 || res.statusCode === 204) && data.trim() === '') {
+                        resolve([]);
                         return;
                     }
                     if (res.statusCode >= 400 && !data.trim().startsWith('{')) {
@@ -239,6 +311,11 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
         if (info && info.name) {
             serverName = info.name;
         }
+        if (Array.isArray(result.tools)) {
+            for (const [name, pairs] of paramHeadersFromTools(result.tools)) {
+                toolParamHeaders.set(name, pairs);
+            }
+        }
         if (message.method === 'initialize' && typeof result.protocolVersion === 'string') {
             negotiatedVersion = result.protocolVersion;
         }
@@ -268,9 +345,33 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
             }
 
             const itemsKey = PAGINATED_LIST_METHODS[method];
-            const responses = itemsKey && !params?.cursor
+            // Notifications (progress, subscription acks) are written the moment
+            // they arrive; responses are written below, after any retry decision.
+            const relayNotification = (notification) => {
+                if (!flight || !flight.cancelled) {
+                    write(notification);
+                }
+            };
+            let responses = itemsKey && !params?.cursor
                 ? [await fetchAllListPages(message, itemsKey, flight)].filter(Boolean)
-                : await post(message, flight);
+                : await post(message, flight, relayNotification);
+
+            // A client may call a tool before this bridge has relayed its schema;
+            // its Mcp-Param-* headers were then missing. Learn the schema and retry
+            // once, as the transport spec advises on HeaderMismatch.
+            const mismatch = responses.some((r) => r && r.error && r.error.code === -32020);
+            if (method === 'tools/call' && mismatch && !toolParamHeaders.has(params?.name)) {
+                const listed = await fetchAllListPages(
+                    { jsonrpc: '2.0', id: `${requestId}-tools`, method: 'tools/list', params: { _meta: params?._meta } },
+                    'tools',
+                    flight
+                );
+                remember({ method: 'tools/list' }, listed);
+                if (toolParamHeaders.has(params?.name)) {
+                    responses = (await post({ ...message, id: `${requestId}-retry` }, flight, relayNotification))
+                        .map((r) => ('id' in r ? { ...r, id: requestId } : r));
+                }
+            }
 
             if (flight && flight.cancelled) {
                 return;
@@ -366,7 +467,7 @@ function main() {
     process.on('SIGTERM', () => process.exit(0));
 }
 
-module.exports = { encodeHeaderValue, buildMcpHeaders, parseSseMessages, createBridge };
+module.exports = { encodeHeaderValue, buildMcpHeaders, parseSseMessages, paramHeadersFromTools, createBridge };
 
 if (require.main === module) {
     main();

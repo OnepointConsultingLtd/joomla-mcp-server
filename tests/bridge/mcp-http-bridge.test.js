@@ -14,6 +14,7 @@ const {
     encodeHeaderValue,
     buildMcpHeaders,
     parseSseMessages,
+    paramHeadersFromTools,
     createBridge,
 } = require('../../site/mcp-http-bridge.js');
 
@@ -231,6 +232,100 @@ test('a request whose reply carries no response gets an error instead of hanging
                 'stream:-32603',
                 'empty:-32603',
             ]);
+        }
+    );
+});
+
+test('progress notifications are relayed while the stream is still open', async () => {
+    let release;
+    const released = new Promise((resolve) => { release = resolve; });
+
+    await withBridge(
+        async ({ body }, res) => {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+            res.write('event: message\ndata: ' + JSON.stringify({
+                jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: 't', progress: 1, total: 2 },
+            }) + '\n\n');
+            await released;
+            res.end('event: message\ndata: ' + JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { resultType: 'complete', content: [] } }) + '\n\n');
+        },
+        async (bridge, output) => {
+            const pending = bridge.handleInput(JSON.stringify({
+                jsonrpc: '2.0', id: 4, method: 'tools/call',
+                params: { name: 'seo_audit_articles', arguments: {}, _meta: { ...MODERN_META, progressToken: 't' } },
+            }));
+
+            const deadline = Date.now() + 2000;
+            while (output.length === 0 && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            assert.equal(output.length, 1, 'the progress notification must arrive before the stream ends');
+            assert.equal(output[0].method, 'notifications/progress');
+
+            release();
+            await pending;
+            assert.equal(output[1].id, 4);
+        }
+    );
+});
+
+const ANNOTATED_TOOLS = [
+    { name: 'get_article_by_id', inputSchema: { type: 'object', properties: { id: { type: 'integer', 'x-mcp-header': 'Id' } } } },
+    { name: 'search_articles', inputSchema: { type: 'object', properties: { search: { type: 'string' } } } },
+];
+
+test('annotations become a per-tool header map', () => {
+    const map = paramHeadersFromTools(ANNOTATED_TOOLS);
+
+    assert.deepEqual(map.get('get_article_by_id'), [['id', 'Id']]);
+    assert.deepEqual(map.get('search_articles'), []);
+});
+
+test('tools/call mirrors annotated arguments into Mcp-Param headers', () => {
+    const map = paramHeadersFromTools(ANNOTATED_TOOLS);
+    const headers = (args) => buildMcpHeaders(
+        { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_article_by_id', arguments: args, _meta: MODERN_META } },
+        null,
+        map
+    );
+
+    assert.equal(headers({ id: 5 })['Mcp-Param-Id'], '5');
+    assert.equal(headers({})['Mcp-Param-Id'], undefined);
+    assert.equal(headers({ id: null })['Mcp-Param-Id'], undefined);
+});
+
+test('param headers learned from a relayed tools/list are sent on later calls', async () => {
+    await withBridge(
+        ({ body }, res) => json(res, 200, body.method === 'tools/list'
+            ? { jsonrpc: '2.0', id: body.id, result: { tools: ANNOTATED_TOOLS } }
+            : { jsonrpc: '2.0', id: body.id, result: { content: [] } }),
+        async (bridge, _output, received) => {
+            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: MODERN_META } }));
+            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_article_by_id', arguments: { id: 5 }, _meta: MODERN_META } }));
+
+            assert.equal(received[1].headers['mcp-param-id'], '5');
+        }
+    );
+});
+
+test('an unknown schema is learned once on HeaderMismatch and the call retried', async () => {
+    await withBridge(
+        ({ body, headers }, res) => {
+            if (body.method === 'tools/list') {
+                json(res, 200, { jsonrpc: '2.0', id: body.id, result: { tools: ANNOTATED_TOOLS } });
+            } else if (headers['mcp-param-id'] === undefined) {
+                json(res, 400, { jsonrpc: '2.0', id: body.id, error: { code: -32020, message: 'Missing Mcp-Param-Id header' } });
+            } else {
+                json(res, 200, { jsonrpc: '2.0', id: body.id, result: { content: [], ok: true } });
+            }
+        },
+        async (bridge, output, received) => {
+            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'get_article_by_id', arguments: { id: 5 }, _meta: MODERN_META } }));
+
+            assert.deepEqual(received.map((entry) => entry.body.method), ['tools/call', 'tools/list', 'tools/call']);
+            assert.equal(output.length, 1, 'only the retried call answers the client');
+            assert.equal(output[0].id, 9, 'under the id the client used');
+            assert.equal(output[0].result.ok, true);
         }
     );
 });

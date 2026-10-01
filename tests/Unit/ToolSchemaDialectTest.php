@@ -31,6 +31,8 @@ class ToolSchemaDialectTest extends TestCase
         'type', 'properties', 'required', 'description', 'title', 'enum', 'default',
         'additionalProperties', 'items', 'minimum', 'maximum', 'minLength', 'maxLength',
         'pattern', 'minItems', 'maxItems', 'uniqueItems', 'format',
+        // An annotation (Mcp-Param-* headers) that validators ignore.
+        'x-mcp-header',
     ];
 
     public function testEveryToolInputSchemaIsAnObjectSchema(): void

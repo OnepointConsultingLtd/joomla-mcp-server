@@ -7,6 +7,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 ## Features
 
 - Every MCP protocol revision from `2024-11-05` to the stateless `2026-07-28` on one endpoint (see [Protocol Versions](#protocol-versions))
+- Argument completion for prompts and article resources, live progress for long-running tools, and `Mcp-Param-*` headers for gateway routing
 - Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log — restricted to the viewer's own requests unless they are a Super User
 - One-click Claude Desktop extension (`.mcpb`), generated on demand from the administrator or attached to every release
 - Security with bearer token authentication, optional IP allow-listing and `Origin` validation
@@ -262,6 +263,8 @@ When **Enable Prompts** is on (the default), MCP clients can pick guided workflo
 
 Turning the option off omits the prompts capability, returns an empty list, and answers `prompts/get` with method-not-found. Under protocol `2026-07-28`, `prompts/list` is method-not-found (HTTP 404) too.
 
+Clients that support completion get suggestions while filling in prompt arguments: published category titles for `category`, article IDs for `article_id` (type digits to match an ID, or words to search titles), and published content-language codes for `target_language`. The `id` of the `joomla://article/{id}` resource template completes the same way. Suggestions come from the caller's own view of the site — their API token and Joomla ACL — so they never reveal anything the caller could not already read.
+
 ## Installation
 
 Download the latest `com_mcpserver-<version>.zip` package from the GitHub releases page, then install it in Joomla Administrator via **System → Install → Extensions**.
@@ -415,6 +418,7 @@ For `2026-07-28` requests:
 - Results carry `resultType: "complete"` and the server's name and version in `_meta`. `server/discover`, `tools/list`, `prompts/list` and `resources/templates/list` add `ttlMs: 300000` and `cacheScope: "public"`; `resources/list` and `resources/read` add the **Cache TTL** option (in milliseconds) and `cacheScope: "private"`, because in Governed Mode they are read with the caller's own token.
 - `subscriptions/listen` is answered as an event stream: an acknowledgement with an empty filter, then the closing result. The server advertises no change notifications (`listChanged` and `subscribe` are false), so it ends the stream at once rather than holding a PHP worker open; clients should re-fetch on the `ttlMs` hints rather than reconnect.
 - `structuredContent` may be any JSON value. For earlier revisions it is sent only when the result is a JSON object; the text content always carries the full result.
+- Tools whose schema marks `id`, `version_id`, `extension_id` or `catid` with `x-mcp-header` (48 tools) also need the matching `Mcp-Param-Id`, `Mcp-Param-Version-Id`, `Mcp-Param-Extension-Id` or `Mcp-Param-Catid` header whenever that argument is sent, so gateways can route or audit on the target without reading the body. A missing or mismatched header gets HTTP 400 with `-32020`. The bundled bridge sends them.
 
 For every revision:
 
@@ -422,8 +426,10 @@ For every revision:
 - An accepted notification gets 202 when the client sent `MCP-Protocol-Version`, and 204 otherwise, which is all that bridges from 1.9.0 and earlier understand. Only `notifications/*` methods may be sent without an id: any other method sent that way gets 400 with `-32600` and is not run.
 - `GET` is served only for the legacy `2024-11-05` stream. A `GET` carrying `MCP-Protocol-Version`, and any `DELETE`, get 405.
 - A rate-limited request gets HTTP 429 with code `-31000`. It was `-32002`, which MCP reserves.
+- A `tools/call` carrying `_meta.progressToken` receives `notifications/progress` on an event-stream response while it runs: page by page for tools that read many pages (SEO audit, internal-link check, custom module lists) and by stage for `install_extension`. A call that reports no progress still gets an ordinary JSON response. Closing the stream cancels the call at its next progress point — never after a change has been saved — and it is logged with status 499.
+- `completion/complete` is available whenever Enable Prompts or Enable Resources is on.
 
-Not implemented, all optional in the specification: OAuth authorization (clients authenticate with the bearer token or a Governed Mode credential), change notifications, completions, multi-round-trip input requests (no tool needs input from the client), the tasks extension and `x-mcp-header` parameter headers.
+Not implemented, all optional in the specification: OAuth authorization (clients authenticate with the bearer token or a Governed Mode credential), push change notifications, multi-round-trip input requests (no tool needs input from the client) and the tasks extension. These are planned. The deprecated logging, sampling and roots features will not be added.
 
 **Upgrading:** a bridge or `.mcpb` extension from 1.9.0 or earlier does not send the headers `2026-07-28` requires, so a client speaking that revision through it gets `-32020`. The exception is the `server/discover` probe that dual-era clients send first: without the header it is answered as a legacy request (`-32601`), so such a client falls back to `initialize` and keeps working in the older protocol. After upgrading the component, download the extension again (below) or replace your copy of `mcp-http-bridge.js`. Clients that use `initialize` keep working with the old bridge.
 

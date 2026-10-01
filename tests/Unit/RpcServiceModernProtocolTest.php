@@ -52,11 +52,10 @@ class RpcServiceModernProtocolTest extends TestCase
     {
         $response = $this->makeService(resourcesEnabled: true, promptsEnabled: true)->handle($this->modern('server/discover'));
 
-        $this->assertSame([
-            'tools' => ['listChanged' => false],
-            'resources' => ['subscribe' => false, 'listChanged' => false],
-            'prompts' => ['listChanged' => false],
-        ], $response['result']['capabilities']);
+        $this->assertSame(
+            '{"tools":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},"prompts":{"listChanged":false},"completions":{}}',
+            json_encode($response['result']['capabilities'])
+        );
     }
 
     public function testDiscoverWithoutModernMetaIsRejectedAsMalformed(): void
@@ -346,6 +345,38 @@ class RpcServiceModernProtocolTest extends TestCase
         $response = $this->makeService()->handle(['jsonrpc' => '2.0', 'id' => 4, 'method' => 'notifications/initialized']);
 
         $this->assertSame('{"jsonrpc":"2.0","id":4,"result":{}}', json_encode($response));
+    }
+
+    public function testDiscoverCarriesTheFullServerIdentity(): void
+    {
+        $info = $this->makeService()->handle($this->modern('server/discover'))['result']['_meta']['io.modelcontextprotocol/serverInfo'];
+
+        $this->assertSame('joomla-mcp-server', $info['name']);
+        $this->assertSame('MCP Server for Joomla', $info['title']);
+        $this->assertSame('https://github.com/OnepointConsultingLtd/joomla-mcp-server', $info['websiteUrl']);
+        $this->assertIsString($info['description']);
+        $this->assertSame(
+            [['src' => 'https://example.test/components/com_mcpserver/icon.png', 'mimeType' => 'image/png', 'sizes' => ['64x64']]],
+            $info['icons']
+        );
+    }
+
+    public function testInitializeCarriesTheFullServerIdentity(): void
+    {
+        $response = $this->makeService()->handle([
+            'jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize',
+            'params' => ['protocolVersion' => '2025-11-25', 'capabilities' => []],
+        ]);
+
+        $this->assertSame('MCP Server for Joomla', $response['result']['serverInfo']['title']);
+        $this->assertArrayHasKey('icons', $response['result']['serverInfo']);
+    }
+
+    public function testOrdinaryResultsCarryOnlyNameAndVersion(): void
+    {
+        $info = $this->makeService()->handle($this->modern('tools/list'))['result']['_meta']['io.modelcontextprotocol/serverInfo'];
+
+        $this->assertSame(['name', 'version'], array_keys($info));
     }
 
     /**

@@ -72,6 +72,8 @@ class JoomlaHttpClient:
         self.timeout = timeout
         self.protocol_version = protocol_version
         self._request_id = 0
+        self._param_headers: dict[str, dict[str, str]] = {}
+        self._param_headers_loaded = False
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -103,7 +105,25 @@ class JoomlaHttpClient:
         name_field = _NAME_SOURCES.get(message["method"])
         if name_field and isinstance(params.get(name_field), str):
             headers["Mcp-Name"] = encode_header_value(params[name_field])
+        if message["method"] == "tools/call":
+            arguments = params.get("arguments") or {}
+            for prop, name in self._param_headers.get(params.get("name", ""), {}).items():
+                value = arguments.get(prop)
+                if value is not None:
+                    text = str(value).lower() if isinstance(value, bool) else str(value)
+                    headers[f"Mcp-Param-{name}"] = encode_header_value(text)
         return headers
+
+    def _remember_param_headers(self, tools: list[dict[str, Any]]) -> None:
+        """Cache each tool's x-mcp-header annotations (argument -> header name)."""
+        for tool in tools:
+            properties = (tool.get("inputSchema") or {}).get("properties") or {}
+            self._param_headers[tool.get("name", "")] = {
+                prop: schema["x-mcp-header"]
+                for prop, schema in properties.items()
+                if isinstance(schema, dict) and isinstance(schema.get("x-mcp-header"), str)
+            }
+        self._param_headers_loaded = True
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         payload = self._message(method, params, self._next_id())
@@ -187,7 +207,9 @@ class JoomlaHttpClient:
         return items
 
     def list_tools(self) -> list[dict[str, Any]]:
-        return self._list_paginated("tools/list", "tools")
+        tools = self._list_paginated("tools/list", "tools")
+        self._remember_param_headers(tools)
+        return tools
 
     def list_resources(self) -> list[dict[str, Any]]:
         return self._list_paginated("resources/list", "resources")
@@ -205,6 +227,10 @@ class JoomlaHttpClient:
         return self.call("prompts/get", {"name": name, "arguments": arguments or {}})
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        # Modern servers reject a call missing its Mcp-Param-* headers, which
+        # come from the tool schemas.
+        if self.protocol_version and not self._param_headers_loaded:
+            self.list_tools()
         result = self.call("tools/call", {"name": name, "arguments": arguments or {}})
         if not isinstance(result, dict):
             return result

@@ -23,6 +23,7 @@
             <filename>mcpserver.php</filename>
             <filename>router.php</filename>
             <filename>mcp-http-bridge.js</filename>
+            <filename>icon.png</filename>
             <folder>src</folder>
             <folder>services</folder>
         </files>

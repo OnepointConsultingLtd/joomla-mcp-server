@@ -252,6 +252,20 @@ class McpProtocolTest extends TestCase
         $this->assertSame(0, $result['ttlMs']);
     }
 
+    public function testCompleteResultKeepsAServerInfoTheResultAlreadyCarries(): void
+    {
+        $full = ['name' => 'joomla-mcp-server', 'version' => '1.9.0', 'title' => 'MCP Server for Joomla'];
+
+        $result = McpProtocol::completeResult(
+            'server/discover',
+            ['_meta' => ['io.modelcontextprotocol/serverInfo' => $full]],
+            $this->serverInfo(),
+            0
+        );
+
+        $this->assertSame($full, $result['_meta']['io.modelcontextprotocol/serverInfo']);
+    }
+
     /**
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>

@@ -111,6 +111,20 @@ final class RpcHandlerTransportTest extends TestCase
         $this->assertSame('', $label);
     }
 
+    public function testParamHeadersComeFromTheToolsSchema(): void
+    {
+        $this->assertSame(['id' => 'Id'], $this->invoke('paramHeadersFor', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'get_article_by_id']]));
+        $this->assertSame([], $this->invoke('paramHeadersFor', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list']));
+    }
+
+    public function testTheHandlerBuildsAnUnstartedHttpSink(): void
+    {
+        $sink = $this->invoke('createProgressSink');
+
+        $this->assertInstanceOf(\Joomla\Component\Mcpserver\Administrator\Service\HttpProgressSink::class, $sink);
+        $this->assertFalse($sink->hasStarted());
+    }
+
     private function invoke(string $method, mixed ...$arguments): mixed
     {
         $reflection = new ReflectionMethod(RpcHandlerTransportTestHost::class, $method);

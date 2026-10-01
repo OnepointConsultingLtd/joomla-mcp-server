@@ -18,6 +18,7 @@ use GuzzleHttp\Exception\RequestException;
 use Joomla\CMS\Cache\Cache;
 use Joomla\CMS\Event\Cache\AfterPurgeEvent;
 use Joomla\CMS\Factory;
+use Joomla\CMS\Uri\Uri;
 use Joomla\CMS\Version as JoomlaVersion;
 use Joomla\Database\DatabaseInterface;
 use Psr\Log\LoggerInterface;
@@ -29,6 +30,19 @@ class RpcService
     private const RESOURCES_ARTICLE_LIMIT = 50;
 
     private const ARTICLE_RESOURCE_URI_PREFIX = 'joomla://article/';
+
+    private const ARTICLE_TEMPLATE_URI = 'joomla://article/{id}';
+
+    private const COMPLETION_VALUE_MAX_LENGTH = 200;
+
+    /** Pages of articles scanned for ID completion: newest-first, up to 1000 IDs. */
+    private const COMPLETION_ARTICLE_PAGES = 10;
+
+    private const SERVER_TITLE = 'MCP Server for Joomla';
+
+    private const SERVER_DESCRIPTION = "Manage a Joomla site's content, structure and configuration through its Web Services API.";
+
+    private const SERVER_WEBSITE = 'https://github.com/OnepointConsultingLtd/joomla-mcp-server';
 
     /**
      * Cache groups clear_cache must never wipe: their loss would disrupt the
@@ -96,6 +110,14 @@ class RpcService
      * @var list<array<string, mixed>>
      */
     private array $streamNotifications = [];
+
+    private ?ProgressSink $progressSink = null;
+
+    /** @var \Closure(): float|null */
+    private ?\Closure $progressClock = null;
+
+    /** The current tools/call's reporter, when it asked for progress. */
+    private ?ProgressReporter $progress = null;
 
     public function __construct(
         RestClient $rest,
@@ -291,6 +313,48 @@ class RpcService
         return $notifications;
     }
 
+    /**
+     * Where progress for the next tools/call goes; null turns progress off. The
+     * clock is injectable so tests can freeze the throttle.
+     *
+     * @param  \Closure(): float|null  $clock
+     */
+    public function setProgressSink(?ProgressSink $sink, ?\Closure $clock = null): void
+    {
+        $this->progressSink = $sink;
+        $this->progressClock = $clock;
+    }
+
+    /**
+     * A progress point for the running tool. Never call this after a mutation
+     * has been committed: a departed client makes it throw ProgressCancelled,
+     * which would report a completed change as cancelled.
+     *
+     * @throws ProgressCancelled
+     */
+    private function reportProgress(float $progress, ?float $total = null, ?string $message = null): void
+    {
+        $this->progress?->report($progress, $total, $message);
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     */
+    private function progressReporterFor(array $params): ?ProgressReporter
+    {
+        $meta = is_array($params['_meta'] ?? null) ? $params['_meta'] : [];
+        $token = $meta['progressToken'] ?? null;
+        if ($this->progressSink === null || !(is_string($token) || is_int($token))) {
+            return null;
+        }
+
+        return new ProgressReporter(
+            $token,
+            $this->progressSink,
+            $this->progressClock ?? static fn (): float => microtime(true)
+        );
+    }
+
     public function handle(array $request): ?array
     {
         $this->lastCallBlocked = false;
@@ -464,6 +528,9 @@ class RpcService
             'prompts/get' => $this->policy->promptsEnabled()
                 ? $this->handleGetPrompt($id, $params)
                 : JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Prompts are disabled by server policy'),
+            'completion/complete' => $this->policy->promptsEnabled() || $this->policy->resourcesEnabled()
+                ? $this->handleComplete($id, $params)
+                : null,
             'site_health' => $this->handleSiteHealth($id),
             default => null,
         };
@@ -487,7 +554,7 @@ class RpcService
         return JsonRpc::successResponse($id, [
             'protocolVersion' => McpProtocol::negotiateLegacy($params['protocolVersion'] ?? null),
             'capabilities' => $this->buildServerCapabilities(),
-            'serverInfo' => $this->serverInfo(),
+            'serverInfo' => $this->serverIdentity(),
             'instructions' => $this->buildInstructions(),
         ]);
     }
@@ -498,6 +565,7 @@ class RpcService
             'supportedVersions' => McpProtocol::supportedVersions(),
             'capabilities' => $this->buildServerCapabilities(),
             'instructions' => $this->buildInstructions(),
+            '_meta' => [McpProtocol::META_SERVER_INFO => $this->serverIdentity()],
         ]);
     }
 
@@ -530,10 +598,218 @@ class RpcService
     }
 
     /**
+     * @param  array<string, mixed>  $params
+     */
+    private function handleComplete(mixed $id, array $params): array
+    {
+        $ref = $params['ref'] ?? null;
+        $argument = $params['argument'] ?? null;
+
+        if (!is_array($ref) || !is_string($ref['type'] ?? null)) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'ref must be an object whose type is ref/prompt or ref/resource');
+        }
+        if (!is_array($argument) || !is_string($argument['name'] ?? null) || !is_string($argument['value'] ?? null)) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'argument must be an object with a string name and a string value');
+        }
+        if (mb_strlen($argument['value']) > self::COMPLETION_VALUE_MAX_LENGTH) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'argument.value must be at most 200 characters');
+        }
+
+        $source = match ($ref['type']) {
+            'ref/prompt' => $this->promptCompletionSource($ref, $argument['name']),
+            'ref/resource' => $this->resourceCompletionSource($ref, $argument['name']),
+            default => 'Unknown ref type: use ref/prompt or ref/resource',
+        };
+        if (is_string($source)) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, $source);
+        }
+
+        try {
+            return JsonRpc::successResponse($id, ['completion' => $source($argument['value'])]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Completion failed', ['ref' => $ref['type'], 'argument' => $argument['name'], 'error' => $e->getMessage()]);
+
+            return JsonRpc::errorResponse($id, JsonRpc::INTERNAL_ERROR, $this->clientErrorMessage($e, 'Completion failed due to an internal error'));
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $ref
+     * @return callable(string): array<string, mixed>|string  the candidate source, or why there is none
+     */
+    private function promptCompletionSource(array $ref, string $argument): callable|string
+    {
+        if (!$this->policy->promptsEnabled()) {
+            return 'Prompts are disabled by server policy';
+        }
+
+        $name = $ref['name'] ?? null;
+        $prompt = is_string($name) ? $this->promptRegistry->get($name) : null;
+        if ($prompt === null) {
+            return 'Unknown prompt. Prompts: ' . implode(', ', array_column($this->promptRegistry->getAll(), 'name'));
+        }
+
+        $defined = array_column($prompt['arguments'] ?? [], 'name');
+        if (!in_array($argument, $defined, true)) {
+            return "Prompt {$name} has no argument '{$argument}'. Its arguments: " . implode(', ', $defined);
+        }
+
+        return match ($argument) {
+            'category' => fn (string $typed): array => CompletionService::complete($this->categoryTitles(), $typed),
+            'article_id' => fn (string $typed): array => $this->completeArticleIds($typed),
+            'target_language' => fn (string $typed): array => CompletionService::complete($this->contentLanguageCodes(), $typed),
+            // Free text (topic): there is nothing to suggest.
+            default => static fn (string $typed): array => CompletionService::complete([], $typed),
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $ref
+     * @return callable(string): array<string, mixed>|string
+     */
+    private function resourceCompletionSource(array $ref, string $argument): callable|string
+    {
+        if (!$this->policy->resourcesEnabled()) {
+            return 'Resources are disabled by server policy';
+        }
+        if (($ref['uri'] ?? null) !== self::ARTICLE_TEMPLATE_URI) {
+            return 'Unknown resource template. Completable template: ' . self::ARTICLE_TEMPLATE_URI;
+        }
+        if ($argument !== 'id') {
+            return 'Resource template ' . self::ARTICLE_TEMPLATE_URI . " has no argument '{$argument}'. Its arguments: id";
+        }
+
+        return fn (string $typed): array => $this->completeArticleIds($typed);
+    }
+
+    /**
+     * Digits complete an article ID by prefix. Anything else is a title search
+     * whose matches are offered by ID, because the ID is what the argument takes.
+     *
+     * Joomla's article search wraps the term in LIKE '%…%' without escaping and
+     * parses id:/author:/content: operators, so the typed text is never sent as
+     * is: the longest segment free of %, _ and : narrows the upstream query (a
+     * superset of the literal matches), and titles are matched literally here.
+     *
+     * @return array{values: list<string>, total: int, hasMore: bool}
+     */
+    private function completeArticleIds(string $typed): array
+    {
+        if ($typed === '' || ctype_digit($typed)) {
+            return CompletionService::complete($this->articleIds(), $typed);
+        }
+
+        $segments = preg_split('/[%_:]+/', $typed, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        usort($segments, static fn (string $a, string $b): int => mb_strlen($b) <=> mb_strlen($a));
+        $term = trim($segments[0] ?? '');
+        if ($term === '') {
+            return CompletionService::complete([], $typed);
+        }
+
+        $response = $this->cache->remember(
+            'articles_search:completion:' . md5($term),
+            fn () => $this->rest->get('api/index.php/v1/content/articles', [
+                'filter[search]' => $term,
+                'page[limit]' => CompletionService::MAX_VALUES + 1,
+            ])
+        );
+
+        $needle = mb_strtolower($typed);
+        $prefix = [];
+        $contains = [];
+        foreach (is_array($response['data'] ?? null) ? $response['data'] : [] as $row) {
+            $title = is_array($row) ? mb_strtolower((string) ($row['attributes']['title'] ?? '')) : '';
+            if (str_starts_with($title, $needle)) {
+                $prefix[] = $row;
+            } elseif (str_contains($title, $needle)) {
+                $contains[] = $row;
+            }
+        }
+
+        // Prefix matches first, then the rest; newest first within each.
+        $ids = [...$this->idsOf($prefix), ...$this->idsOf($contains)];
+
+        return [
+            'values' => array_slice($ids, 0, CompletionService::MAX_VALUES),
+            'total' => count($ids),
+            'hasMore' => count($ids) > CompletionService::MAX_VALUES,
+        ];
+    }
+
+    /**
+     * The articles_search: prefix means article writes already invalidate it.
+     *
+     * @return list<string>
+     */
+    private function articleIds(): array
+    {
+        return $this->cache->remember(
+            'articles_search:completion:ids',
+            fn (): array => $this->idsOf($this->fetchAllPages('api/index.php/v1/content/articles', [], 100, self::COMPLETION_ARTICLE_PAGES))
+        );
+    }
+
+    /**
+     * Newest first: higher IDs are more recent articles.
+     *
+     * @param  array<int|string, mixed>  $rows
+     * @return list<string>
+     */
+    private function idsOf(array $rows): array
+    {
+        $ids = [];
+        foreach ($rows as $row) {
+            $id = is_array($row) ? (int) ($row['id'] ?? 0) : 0;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        rsort($ids);
+
+        return array_map('strval', $ids);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function categoryTitles(): array
+    {
+        return $this->cache->remember('categories_list:completion', function (): array {
+            $titles = [];
+            foreach ($this->fetchAllPages(self::CATEGORIES_PATH, ['filter[published]' => 1]) as $row) {
+                $title = is_array($row) ? ($row['attributes']['title'] ?? null) : null;
+                if (is_string($title)) {
+                    $titles[] = $title;
+                }
+            }
+
+            return $titles;
+        });
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function contentLanguageCodes(): array
+    {
+        return $this->cache->remember('content_languages:completion', function (): array {
+            $codes = [];
+            foreach ($this->fetchAllPages(self::CONTENT_LANGUAGES_PATH, ['filter[published]' => 1]) as $row) {
+                $attributes = is_array($row['attributes'] ?? null) ? $row['attributes'] : (is_array($row) ? $row : []);
+                if (is_string($attributes['lang_code'] ?? null)) {
+                    $codes[] = $attributes['lang_code'];
+                }
+            }
+
+            return $codes;
+        });
+    }
+
+    /**
      * The explicit false flags are load-bearing: `'tools' => []` would encode as
      * a JSON array, not the object the capability must be.
      *
-     * @return array<string, array<string, bool>>
+     * @return array<string, mixed>
      */
     private function buildServerCapabilities(): array
     {
@@ -545,6 +821,10 @@ class RpcService
         }
         if ($this->policy->promptsEnabled()) {
             $capabilities['prompts'] = ['listChanged' => false];
+        }
+        // Completions exist only for prompt arguments and the article template.
+        if ($this->policy->resourcesEnabled() || $this->policy->promptsEnabled()) {
+            $capabilities['completions'] = new \stdClass();
         }
 
         return $capabilities;
@@ -574,6 +854,26 @@ class RpcService
         return [
             'name' => $this->serverName,
             'version' => $this->getComponentVersion(),
+        ];
+    }
+
+    /**
+     * The full self-description, for initialize and server/discover. Every other
+     * modern result carries only serverInfo() in its _meta, keeping responses small.
+     *
+     * @return array<string, mixed>
+     */
+    private function serverIdentity(): array
+    {
+        return $this->serverInfo() + [
+            'title' => self::SERVER_TITLE,
+            'description' => self::SERVER_DESCRIPTION,
+            'websiteUrl' => self::SERVER_WEBSITE,
+            'icons' => [[
+                'src' => Uri::root() . 'components/com_mcpserver/icon.png',
+                'mimeType' => 'image/png',
+                'sizes' => ['64x64'],
+            ]],
         ];
     }
 
@@ -816,13 +1116,37 @@ class RpcService
             $intro = mb_substr($intro, 0, 200);
         }
 
-        return [
+        $resource = [
             'uri' => self::ARTICLE_RESOURCE_URI_PREFIX . $id,
             'name' => $alias !== '' ? $alias : 'article-' . $id,
             'title' => (string) ($attributes['title'] ?? ''),
             'description' => $intro,
             'mimeType' => 'text/html',
         ];
+
+        $modified = $this->isoTimestamp($attributes['modified'] ?? null);
+        if ($modified !== null) {
+            $resource['annotations'] = ['lastModified' => $modified];
+        }
+
+        return $resource;
+    }
+
+    /**
+     * Joomla stores datetimes as UTC SQL strings, and writes a zero date for
+     * "never"; MCP annotations want ISO 8601.
+     */
+    private function isoTimestamp(mixed $value): ?string
+    {
+        if (!is_string($value) || $value === '' || str_starts_with($value, '0000-00-00')) {
+            return null;
+        }
+
+        try {
+            return (new \DateTimeImmutable($value, new \DateTimeZone('UTC')))->format(DATE_ATOM);
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     private function handleListPrompts(mixed $id, array $params): array
@@ -1086,10 +1410,20 @@ class RpcService
             return JsonRpc::successResponse($id, $this->formatToolError('Tool access is not authorized.'));
         }
 
+        $this->progress = $this->progressReporterFor($params);
+
         try {
             $result = $this->toolRegistry->execute($toolName, $toolParams);
 
             return JsonRpc::successResponse($id, $this->formatToolSuccess($result, $modern));
+        } catch (ProgressCancelled) {
+            // The client closed the stream (the Streamable HTTP cancellation
+            // signal). Nothing more is sent, but the call is still audited, as a
+            // failure under the client-closed-request status.
+            $this->lastCallFailed = true;
+            $this->lastHttpStatus = 499;
+
+            return JsonRpc::errorResponse($id, JsonRpc::INTERNAL_ERROR, 'Request cancelled by the client');
         } catch (\Throwable $e) {
             // Mark the call failed so the caller does not audit this as 'ok':
             // the response below is a JSON-RPC success envelope carrying an
@@ -1109,6 +1443,8 @@ class RpcService
             $clientMessage = $this->clientErrorMessage($e, 'Tool execution failed due to an internal error');
 
             return JsonRpc::successResponse($id, $this->formatToolError($clientMessage));
+        } finally {
+            $this->progress = null;
         }
     }
 
@@ -1720,6 +2056,7 @@ class RpcService
     {
         $items = [];
         $offset = 0;
+        $totalPages = null;
 
         for ($page = 0; $page < $maxPages; $page++) {
             $response = $this->rest->get($path, array_merge($query, [
@@ -1727,12 +2064,24 @@ class RpcService
                 'page[offset]' => $offset,
             ]));
 
+            if ($page === 0 && is_numeric($response['meta']['total-pages'] ?? null)) {
+                $totalPages = min($maxPages, (int) $response['meta']['total-pages']);
+            }
+
             $data = $response['data'] ?? [];
             if (!is_array($data) || $data === [] || isset($data['id'])) {
                 break;
             }
 
             $items = array_merge($items, array_values($data));
+
+            // Every caller fetches before it writes, so stopping here never
+            // abandons a half-done change.
+            $this->reportProgress(
+                $page + 1,
+                $totalPages !== null ? (float) $totalPages : null,
+                'Fetched page ' . ($page + 1) . ($totalPages !== null ? ' of ' . $totalPages : '')
+            );
 
             $count = count($data);
             $offset += $count;
@@ -3122,6 +3471,10 @@ class RpcService
     {
         $bytes = $this->resolveExtensionPackageBytes($params);
 
+        // Progress points stop at the install itself: a cancellation after it
+        // would report an installed extension as cancelled.
+        $this->reportProgress(1, 3, 'Package received');
+
         $tmpPath = (string) Factory::getApplication()->get('tmp_path');
         if ($tmpPath === '' || !is_dir($tmpPath) || !is_writable($tmpPath)) {
             throw new \RuntimeException('Joomla tmp_path is not writable');
@@ -3184,6 +3537,8 @@ class RpcService
 
             $app = Factory::getApplication();
             $app->getMessageQueue(true); // flush any pre-existing messages
+
+            $this->reportProgress(2, 3, 'Package unpacked, installing');
 
             $installer = \Joomla\CMS\Installer\Installer::getInstance();
             $ok = (bool) $installer->install($package['dir']);

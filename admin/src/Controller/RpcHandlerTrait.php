@@ -21,6 +21,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernedToolAuthorizer;
+use Joomla\Component\Mcpserver\Administrator\Service\HttpProgressSink;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaActionLogService;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
 use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
@@ -295,6 +296,7 @@ trait RpcHandlerTrait
 
         try {
             McpHttpTransport::validate($request, $mcpHeaders);
+            McpHttpTransport::validateParamHeaders($request, $mcpHeaders, $this->paramHeadersFor($request));
         } catch (McpProtocolError $e) {
             $this->rejectProtocolError(
                 $e,
@@ -314,7 +316,15 @@ trait RpcHandlerTrait
         // decrypts the principal's API token, work a rejected request never needs.
         $rpcService = $this->rpcServiceFor($params, $principal);
 
+        // The legacy ?sessionId relay parks one complete response in a cache, so
+        // it cannot carry a live stream.
+        $progressSink = empty($sessionId) ? $this->createProgressSink() : null;
+        $rpcService->setProgressSink($progressSink);
+
         [$response, $dispatchFailed] = $this->dispatchToService($rpcService, $request, $method);
+
+        // The container's shared RpcService outlives this request.
+        $rpcService->setProgressSink(null);
         $streamNotifications = $rpcService->takeStreamNotifications();
 
         // Policy denials (disabled tool, read-only mode) and tool execution
@@ -347,8 +357,13 @@ trait RpcHandlerTrait
             return;
         }
 
-        // Settled before the audit write so the row records what is sent.
-        $httpStatus = $dispatchFailed ? 500 : McpHttpTransport::responseStatus($rpcService->getLastHttpStatus(), $response);
+        // Settled before the audit write so the row records what is sent. Once
+        // progress has streamed the status was 200, or 499 if the client left.
+        $httpStatus = match (true) {
+            $progressSink?->hasStarted() === true => $rpcService->getLastHttpStatus() ?? 200,
+            $dispatchFailed => 500,
+            default => McpHttpTransport::responseStatus($rpcService->getLastHttpStatus(), $response),
+        };
 
         $this->recordGovernanceAudit(
             $startTime,
@@ -363,6 +378,13 @@ trait RpcHandlerTrait
             $this->extractRequestId($request),
             $this->extractMutationTarget($request)
         );
+
+        if ($progressSink?->hasStarted() === true) {
+            // The response joins the progress already streamed, unless the client left.
+            $progressSink->finish($response);
+            $app->close();
+            return;
+        }
 
         $jsonResponse = json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
@@ -400,6 +422,32 @@ trait RpcHandlerTrait
         return $principal !== null
             ? $this->createRpcServiceForPrincipal($params, $principal)
             : ($this->resolveService(RpcService::class) ?? $this->createRpcService($params));
+    }
+
+    /**
+     * The live progress stream for one request. The stream starts only when a
+     * tool first reports progress; until then the response is ordinary JSON.
+     */
+    private function createProgressSink(): HttpProgressSink
+    {
+        return new HttpProgressSink(
+            static function (): void {
+                header('Content-Type: text/event-stream');
+                header('Cache-Control: no-cache');
+                header('X-Accel-Buffering: no');
+                http_response_code(200);
+                // Compression and output buffers would hold every event until the
+                // end; a disconnect must not end the script before it is audited.
+                @ini_set('zlib.output_compression', '0');
+                HttpProgressSink::drainOutputBuffers();
+                ignore_user_abort(true);
+            },
+            static function (string $bytes): void {
+                echo $bytes;
+                flush();
+            },
+            static fn (): bool => connection_aborted() === 1
+        );
     }
 
     /**
@@ -651,6 +699,19 @@ trait RpcHandlerTrait
         };
 
         return is_string($label) ? $label : '';
+    }
+
+    /**
+     * @return array<string, string>  the called tool's x-mcp-header map
+     */
+    private function paramHeadersFor(array $request): array
+    {
+        $name = $this->extractToolName($request);
+        if (($request['method'] ?? '') !== 'tools/call' || $name === '') {
+            return [];
+        }
+
+        return ($this->resolveService(ToolRegistry::class) ?? new ToolRegistry())->paramHeaders($name);
     }
 
     /**

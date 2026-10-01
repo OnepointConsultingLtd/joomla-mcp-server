@@ -6,9 +6,10 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## Features
 
+- Every MCP protocol revision from `2024-11-05` to the stateless `2026-07-28` on one endpoint (see [Protocol Versions](#protocol-versions))
 - Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log — restricted to the viewer's own requests unless they are a Super User
 - One-click Claude Desktop extension (`.mcpb`), generated on demand from the administrator or attached to every release
-- Security with bearer token authentication, optional IP allow-listing and CORS origin control
+- Security with bearer token authentication, optional IP allow-listing and `Origin` validation
 - Configurable fixed-window rate limiting
 - Response caching through Joomla's cache layer
 - JSON Schema validation for MCP tool inputs
@@ -247,7 +248,7 @@ When **Enable Resources** is on (the default), MCP clients can attach published 
 - `resources/templates/list` advertises the template `joomla://article/{id}`.
 - `resources/read` returns the article HTML (`introtext` + `fulltext`, `mimeType` `text/html`).
 
-Turning the option off omits the resources capability, returns empty lists, and answers `resources/read` with method-not-found.
+Turning the option off omits the resources capability, returns empty lists, and answers `resources/read` with method-not-found. Under protocol `2026-07-28` the list methods are method-not-found (HTTP 404) too, as that revision prescribes for a capability the server does not advertise.
 
 ## MCP Prompts
 
@@ -259,7 +260,7 @@ When **Enable Prompts** is on (the default), MCP clients can pick guided workflo
 | `seo-audit-article` | `article_id` (required) | Audit an article for SEO and suggest `update_article` changes |
 | `translate-article` | `article_id` and `target_language` (required) | Translate an article, then `create_article` and `set_article_associations` |
 
-Turning the option off omits the prompts capability, returns an empty list, and answers `prompts/get` with method-not-found.
+Turning the option off omits the prompts capability, returns an empty list, and answers `prompts/get` with method-not-found. Under protocol `2026-07-28`, `prompts/list` is method-not-found (HTTP 404) too.
 
 ## Installation
 
@@ -288,7 +289,7 @@ Key settings:
 - `Require Auth`: requires MCP clients to send a bearer token.
 - `MCP Bearer Token`: token clients must send in `Authorization: Bearer`.
 - `IP Allow List`: comma-separated client IP allow list.
-- `Allowed Origins`: comma-separated CORS origin allow list.
+- `Allowed Origins`: comma-separated browser origins allowed to call the endpoint. A request carrying any other `Origin` header is refused with HTTP 403, as the MCP specification requires to prevent DNS rebinding. That includes the site's own origin, which must be listed to be trusted: Joomla derives it from the request's `Host` header, which a rebinding page controls. Clients that send no `Origin` (desktop clients, the bridge) are unaffected.
 - `Trusted Proxies`: comma-separated proxy IPs trusted for `X-Forwarded-For`.
 - `Read-Only Mode`: when enabled, only read-only tools may run; every tool that writes, deletes or installs anything is blocked.
 - `Disabled Tools`: comma- or newline-separated MCP tool names to block (e.g. `delete_article`). Defaults to the code-execution tools (`install_extension`, `uninstall_extension`, `update_template_file`), the custom field tools and the extension params tools (`get_extension_params`, `update_extension_params`); remove them to opt in, or enter `none` to allow all tools (an emptied field reverts to the defaults when saved).
@@ -393,11 +394,38 @@ Disabling **Governed Mode** in **Options → Security Settings** is the rollback
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/index.php?option=com_mcpserver&task=rpc.handle` | MCP JSON-RPC endpoint in the site application |
-| `GET` | `/index.php?option=com_mcpserver&task=rpc.sse` | Server-Sent Events stream used by the stdio bridge |
+| `POST` | `/index.php?option=com_mcpserver&task=rpc.handle` | MCP JSON-RPC endpoint in the site application (Streamable HTTP, every protocol version) |
+| `GET` | `/index.php?option=com_mcpserver&task=rpc.sse` | Legacy HTTP+SSE stream for 2024-11-05 clients (the bundled bridge does not use it) |
 | `GET` | `/index.php?option=com_mcpserver&task=health.ping` | Site health endpoint |
 | `POST` | `/administrator/index.php?option=com_mcpserver&task=rpc.handle` | MCP JSON-RPC endpoint in the administrator application |
 | `GET` | `/administrator/index.php?option=com_mcpserver&task=health.ping` | Administrator health endpoint |
+
+## Protocol Versions
+
+The endpoint serves every MCP revision from `2024-11-05` to `2026-07-28` on the same URL and decides per request which rules apply:
+
+| Revision | How a client selects it |
+|---|---|
+| `2026-07-28` (stateless) | Every request carries `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities` in `params._meta`. There is no handshake; `server/discover` reports the supported versions, capabilities and server identity. |
+| `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` | The `initialize` handshake. A client asking `initialize` for any other version — including `2026-07-28`, which has no handshake — is offered `2025-11-25`. |
+
+For `2026-07-28` requests:
+
+- Every POST must carry `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `prompts/get` and `resources/read`, `Mcp-Name`, each matching the body (a value that is not plain ASCII is sent as `=?base64?…?=`). A missing or mismatched header gets HTTP 400 with `-32020`, an unsupported version 400 with `-32022` and the supported list, a missing `_meta` field 400 with `-32602`, and a method the revision does not define (`ping`, `logging/setLevel`, `resources/subscribe`, …) 404 with `-32601`. Batches are refused.
+- Results carry `resultType: "complete"` and the server's name and version in `_meta`. `server/discover`, `tools/list`, `prompts/list` and `resources/templates/list` add `ttlMs: 300000` and `cacheScope: "public"`; `resources/list` and `resources/read` add the **Cache TTL** option (in milliseconds) and `cacheScope: "private"`, because in Governed Mode they are read with the caller's own token.
+- `subscriptions/listen` is answered as an event stream: an acknowledgement with an empty filter, then the closing result. The server advertises no change notifications (`listChanged` and `subscribe` are false), so it ends the stream at once rather than holding a PHP worker open; clients should re-fetch on the `ttlMs` hints rather than reconnect.
+- `structuredContent` may be any JSON value. For earlier revisions it is sent only when the result is a JSON object; the text content always carries the full result.
+
+For every revision:
+
+- Arguments that fail the tool's input schema come back as a tool result with `isError: true` (so the model can correct them) rather than a `-32602` error; an unknown tool name is a `-32602` error.
+- An accepted notification gets 202 when the client sent `MCP-Protocol-Version`, and 204 otherwise, which is all that bridges from 1.9.0 and earlier understand. Only `notifications/*` methods may be sent without an id: any other method sent that way gets 400 with `-32600` and is not run.
+- `GET` is served only for the legacy `2024-11-05` stream. A `GET` carrying `MCP-Protocol-Version`, and any `DELETE`, get 405.
+- A rate-limited request gets HTTP 429 with code `-31000`. It was `-32002`, which MCP reserves.
+
+Not implemented, all optional in the specification: OAuth authorization (clients authenticate with the bearer token or a Governed Mode credential), change notifications, completions, multi-round-trip input requests (no tool needs input from the client), the tasks extension and `x-mcp-header` parameter headers.
+
+**Upgrading:** a bridge or `.mcpb` extension from 1.9.0 or earlier does not send the headers `2026-07-28` requires, so a client speaking that revision through it gets `-32020`. The exception is the `server/discover` probe that dual-era clients send first: without the header it is answered as a legacy request (`-32601`), so such a client falls back to `initialize` and keeps working in the older protocol. After upgrading the component, download the extension again (below) or replace your copy of `mcp-http-bridge.js`. Clients that use `initialize` keep working with the old bridge.
 
 ## Claude Desktop Extension (.mcpb)
 
@@ -452,7 +480,7 @@ For your agent (e.g. Codex, Cursor, Claude, Hermes, OpenClaw), point your MCP cl
 }
 ```
 
-The bridge speaks plain HTTP POST with no SSE or transport negotiation, so connection failures surface their real cause.
+The bridge sends each stdio message as its own HTTP POST, adding the `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers Streamable HTTP requires, and relays an event-stream reply message by message. It does no transport negotiation, so connection failures surface their real cause. A `notifications/cancelled` from the client aborts the matching HTTP request instead of being forwarded.
 
 #### Windows / Claude Desktop
 

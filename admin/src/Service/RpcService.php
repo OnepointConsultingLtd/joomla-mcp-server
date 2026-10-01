@@ -13,6 +13,7 @@ namespace Joomla\Component\Mcpserver\Administrator\Service;
 defined('_JEXEC') or die;
 
 use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 use Joomla\CMS\Cache\Cache;
 use Joomla\CMS\Event\Cache\AfterPurgeEvent;
@@ -23,8 +24,6 @@ use Psr\Log\LoggerInterface;
 
 class RpcService
 {
-    private const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-
     private const DEFAULT_TOOLS_LIST_PAGE_SIZE = 100;
 
     private const RESOURCES_ARTICLE_LIMIT = 50;
@@ -82,6 +81,21 @@ class RpcService
     private bool $lastCallBlocked = false;
 
     private bool $lastCallFailed = false;
+
+    /**
+     * HTTP status the last response must be sent with, when the protocol fixes
+     * one (a 400 for unusable request metadata, a 404 for a method a modern
+     * request cannot call). Null leaves the transport's default mapping.
+     */
+    private ?int $lastHttpStatus = null;
+
+    /**
+     * Notifications to stream ahead of the last response, which then goes out as
+     * a Server-Sent Events stream rather than a single JSON body.
+     *
+     * @var list<array<string, mixed>>
+     */
+    private array $streamNotifications = [];
 
     public function __construct(
         RestClient $rest,
@@ -259,14 +273,34 @@ class RpcService
         return $this->lastCallFailed;
     }
 
+    public function getLastHttpStatus(): ?int
+    {
+        return $this->lastHttpStatus;
+    }
+
+    /**
+     * Take (and clear) the notifications queued for the last response's stream.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function takeStreamNotifications(): array
+    {
+        $notifications = $this->streamNotifications;
+        $this->streamNotifications = [];
+
+        return $notifications;
+    }
+
     public function handle(array $request): ?array
     {
         $this->lastCallBlocked = false;
         $this->lastCallFailed = false;
+        $this->lastHttpStatus = null;
+        $this->streamNotifications = [];
 
         $id = $request['id'] ?? null;
         $isNotification = !array_key_exists('id', $request);
-        $method = $request['method'] ?? '';
+        $method = is_string($request['method'] ?? null) ? $request['method'] : '';
         $params = $request['params'] ?? [];
 
         $this->logger->info('Handling RPC request', [
@@ -275,95 +309,234 @@ class RpcService
             'server' => $this->serverName
         ]);
 
+        // A JSON-RPC response posted by the client. This server never sends
+        // requests to clients, so there is nothing to correlate it with; the
+        // legacy transports require accepting it all the same.
+        if (!array_key_exists('method', $request)
+            && (array_key_exists('result', $request) || array_key_exists('error', $request))
+        ) {
+            return null;
+        }
+
+        // A notification gets no response, so nothing may run for one. The
+        // notifications a client sends are all no-ops here; a request method
+        // sent without an id (never valid MCP) is dropped rather than executed
+        // where no one would see its result.
+        if ($isNotification) {
+            return null;
+        }
+
+        if (!is_array($params) || ($params !== [] && array_is_list($params))) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'params must be an object');
+        }
+
+        try {
+            $context = McpProtocol::contextFor($request);
+        } catch (McpProtocolError $e) {
+            $this->lastHttpStatus = $e->httpStatus;
+
+            return $e->toResponse($id);
+        }
+
+        return $context !== null
+            ? $this->handleModern($id, $method, $params, $context)
+            : $this->handleLegacy($id, $method, $params);
+    }
+
+    /**
+     * Initialize-era semantics (2025-11-25 and earlier). The server never kept
+     * handshake state, so these requests are served statelessly too.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function handleLegacy(mixed $id, string $method, array $params): array
+    {
         if ($method === 'notifications/initialized'
             || $method === 'notifications/cancelled'
             || $method === 'notifications/progress'
             || $method === 'notifications/roots/list_changed'
         ) {
-            return $isNotification ? null : JsonRpc::successResponse($id, null);
+            // Sent with an id by mistake, a notification still gets a valid
+            // (empty object) result: `null` is not one.
+            return JsonRpc::successResponse($id, new \stdClass());
         }
 
         if ($method === 'initialize' || $method === 'capabilities') {
-            $response = $this->handleCapabilities($id, $params);
-            return $isNotification ? null : $response;
+            return $this->handleCapabilities($id, $params);
         }
 
-        if ($method === 'ping') {
-            return $isNotification ? null : JsonRpc::successResponse($id, new \stdClass());
+        if ($method === 'ping' || $method === 'logging/setLevel') {
+            return JsonRpc::successResponse($id, new \stdClass());
         }
 
-        if ($method === 'tools/list') {
-            $response = $this->handleListTools($id, $params);
-            return $isNotification ? null : $response;
+        if ($method === 'server/discover') {
+            // Only the stateless revision defines server/discover, and it
+            // requires per-request metadata this request does not carry.
+            $this->lastHttpStatus = 400;
+
+            return JsonRpc::errorResponse(
+                $id,
+                JsonRpc::INVALID_PARAMS,
+                'Missing required _meta field ' . McpProtocol::META_PROTOCOL_VERSION
+            );
         }
 
-        if ($method === 'tools/call') {
-            $response = $this->handleCallTool($id, $params);
-            return $isNotification ? null : $response;
+        return $this->dispatchCommon($id, $method, $params, false)
+            ?? JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Requested method not implemented');
+    }
+
+    /**
+     * Stateless 2026-07-28 semantics: no handshake, and every result carries
+     * resultType, the server's identity and — where cacheable — caching hints.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function handleModern(mixed $id, string $method, array $params, McpRequestContext $context): array
+    {
+        // clientInfo is self-reported: for diagnostics only, never a decision.
+        $this->logger->debug('Stateless MCP request', [
+            'method' => $method,
+            'protocol' => $context->protocolVersion,
+            'client' => $context->clientInfo['name'] ?? null,
+        ]);
+
+        $response = match ($method) {
+            'server/discover' => $this->handleDiscover($id),
+            'subscriptions/listen' => $this->handleSubscriptionsListen($id, $params),
+            // Legacy clients get empty lists for a capability switched off; the
+            // schema has a modern client told the method is not there.
+            'resources/list', 'resources/templates/list' => $this->policy->resourcesEnabled()
+                ? $this->dispatchCommon($id, $method, $params, true)
+                : null,
+            'prompts/list' => $this->policy->promptsEnabled()
+                ? $this->dispatchCommon($id, $method, $params, true)
+                : null,
+            default => $this->dispatchCommon($id, $method, $params, true),
+        };
+
+        // Removed in this revision (ping, logging/setLevel, resources/subscribe),
+        // never implemented (completion/complete), or gated behind a capability
+        // policy switched off. Streamable HTTP answers all of these with 404 and
+        // a JSON-RPC body — which is what tells a client this is a modern server
+        // and not a legacy HTTP+SSE endpoint 404ing without one.
+        if ($response === null || ($response['error']['code'] ?? null) === JsonRpc::METHOD_NOT_FOUND) {
+            $this->lastHttpStatus = 404;
+
+            return $response ?? JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Method not found: ' . $method);
         }
 
-        if ($method === 'resources/list') {
-            $response = $this->policy->resourcesEnabled()
+        if (isset($response['error']) || !is_array($response['result'] ?? null)) {
+            return $response;
+        }
+
+        $response['result'] = McpProtocol::completeResult(
+            $method,
+            $response['result'],
+            $this->serverInfo(),
+            $this->cache->getDefaultTtl() * 1000
+        );
+
+        return $response;
+    }
+
+    /**
+     * Methods whose behaviour is the same in both eras. Null for any other.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function dispatchCommon(mixed $id, string $method, array $params, bool $modern): ?array
+    {
+        return match ($method) {
+            'tools/list' => $this->handleListTools($id, $params),
+            'tools/call' => $this->handleCallTool($id, $params, $modern),
+            'resources/list' => $this->policy->resourcesEnabled()
                 ? $this->handleListResources($id, $params)
-                : JsonRpc::successResponse($id, ['resources' => []]);
-            return $isNotification ? null : $response;
-        }
-
-        if ($method === 'resources/templates/list') {
-            $response = $this->policy->resourcesEnabled()
+                : JsonRpc::successResponse($id, ['resources' => []]),
+            'resources/templates/list' => $this->policy->resourcesEnabled()
                 ? $this->handleListResourceTemplates($id, $params)
-                : JsonRpc::successResponse($id, ['resourceTemplates' => []]);
-            return $isNotification ? null : $response;
-        }
-
-        if ($method === 'resources/read') {
-            $response = $this->policy->resourcesEnabled()
+                : JsonRpc::successResponse($id, ['resourceTemplates' => []]),
+            'resources/read' => $this->policy->resourcesEnabled()
                 ? $this->handleReadResource($id, $params)
-                : JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Resources are disabled by server policy');
-            return $isNotification ? null : $response;
-        }
-
-        if ($method === 'prompts/list') {
-            $response = $this->policy->promptsEnabled()
+                : JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Resources are disabled by server policy'),
+            'prompts/list' => $this->policy->promptsEnabled()
                 ? $this->handleListPrompts($id, $params)
-                : JsonRpc::successResponse($id, ['prompts' => []]);
-            return $isNotification ? null : $response;
-        }
-
-        if ($method === 'prompts/get') {
-            $response = $this->policy->promptsEnabled()
+                : JsonRpc::successResponse($id, ['prompts' => []]),
+            'prompts/get' => $this->policy->promptsEnabled()
                 ? $this->handleGetPrompt($id, $params)
-                : JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Prompts are disabled by server policy');
-            return $isNotification ? null : $response;
-        }
+                : JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Prompts are disabled by server policy'),
+            'site_health' => $this->handleSiteHealth($id),
+            default => null,
+        };
+    }
 
-        if ($method === 'logging/setLevel') {
-            return $isNotification ? null : JsonRpc::successResponse($id, new \stdClass());
-        }
+    private function handleSiteHealth(mixed $id): array
+    {
+        $version = new JoomlaVersion();
 
-        if ($method === 'site_health') {
-            $version = new JoomlaVersion();
-            $response = JsonRpc::successResponse($id, [
-                'status' => 'ok',
-                'joomla_version' => $version->getShortVersion(),
-                'timestamp' => (new \DateTimeImmutable('now'))
-                    ->setTimezone(new \DateTimeZone('UTC'))
-                    ->format(DATE_ATOM),
-            ]);
-            return $isNotification ? null : $response;
-        }
-
-        $response = JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Requested method not implemented');
-        return $isNotification ? null : $response;
+        return JsonRpc::successResponse($id, [
+            'status' => 'ok',
+            'joomla_version' => $version->getShortVersion(),
+            'timestamp' => (new \DateTimeImmutable('now'))
+                ->setTimezone(new \DateTimeZone('UTC'))
+                ->format(DATE_ATOM),
+        ]);
     }
 
     private function handleCapabilities(mixed $id, array $params = []): array
     {
-        $clientVersion = $params['protocolVersion'] ?? null;
-        $negotiatedVersion = is_string($clientVersion) && in_array($clientVersion, self::SUPPORTED_PROTOCOL_VERSIONS, true)
-            ? $clientVersion
-            : self::SUPPORTED_PROTOCOL_VERSIONS[0];
+        return JsonRpc::successResponse($id, [
+            'protocolVersion' => McpProtocol::negotiateLegacy($params['protocolVersion'] ?? null),
+            'capabilities' => $this->buildServerCapabilities(),
+            'serverInfo' => $this->serverInfo(),
+            'instructions' => $this->buildInstructions(),
+        ]);
+    }
 
+    private function handleDiscover(mixed $id): array
+    {
+        return JsonRpc::successResponse($id, [
+            'supportedVersions' => McpProtocol::supportedVersions(),
+            'capabilities' => $this->buildServerCapabilities(),
+            'instructions' => $this->buildInstructions(),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $params
+     */
+    private function handleSubscriptionsListen(mixed $id, array $params): array
+    {
+        $filter = $params['notifications'] ?? null;
+        if (!is_array($filter) || ($filter !== [] && array_is_list($filter))) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'params.notifications must be an object');
+        }
+
+        // The server advertises neither listChanged nor resources.subscribe, so it
+        // honours none of the requested notification types: the acknowledgement
+        // carries an empty filter and the subscription is closed gracefully at
+        // once. Holding the stream open would pin a PHP worker per listener
+        // (as the legacy rpc.sse loop does, for up to 300 s) for notifications
+        // that can never be sent.
+        $this->streamNotifications[] = [
+            'jsonrpc' => '2.0',
+            'method' => 'notifications/subscriptions/acknowledged',
+            'params' => [
+                '_meta' => [McpProtocol::META_SUBSCRIPTION_ID => $id],
+                'notifications' => new \stdClass(),
+            ],
+        ];
+
+        return JsonRpc::successResponse($id, ['_meta' => [McpProtocol::META_SUBSCRIPTION_ID => $id]]);
+    }
+
+    /**
+     * The explicit false flags are load-bearing: `'tools' => []` would encode as
+     * a JSON array, not the object the capability must be.
+     *
+     * @return array<string, array<string, bool>>
+     */
+    private function buildServerCapabilities(): array
+    {
         $capabilities = [
             'tools' => ['listChanged' => false],
         ];
@@ -374,6 +547,11 @@ class RpcService
             $capabilities['prompts'] = ['listChanged' => false];
         }
 
+        return $capabilities;
+    }
+
+    private function buildInstructions(): string
+    {
         $instructions = 'List tool responses include a pagination object with has_more, next_offset, '
             . 'and total_count. When has_more is true, call the same tool again with offset set to '
             . 'next_offset (and the same limit if used) to retrieve the remaining items. '
@@ -385,15 +563,18 @@ class RpcService
             $instructions .= ' Guided prompts: draft-article, seo-audit-article, translate-article.';
         }
 
-        return JsonRpc::successResponse($id, [
-            'protocolVersion' => $negotiatedVersion,
-            'capabilities' => $capabilities,
-            'serverInfo' => [
-                'name' => $this->serverName,
-                'version' => $this->getComponentVersion(),
-            ],
-            'instructions' => $instructions,
-        ]);
+        return $instructions;
+    }
+
+    /**
+     * @return array{name: string, version: string}
+     */
+    private function serverInfo(): array
+    {
+        return [
+            'name' => $this->serverName,
+            'version' => $this->getComponentVersion(),
+        ];
     }
 
     private function getComponentVersion(): string
@@ -538,9 +719,9 @@ class RpcService
         }
 
         $articleId = $this->parseArticleResourceUri($uri);
-        // Unknown resource → INVALID_PARAMS (-32602), NOT the MCP spec's
-        // -32002 (resource not found). JsonRpc::RATE_LIMITED already occupies
-        // -32002 and RpcHandlerTrait maps it to HTTP 429 + rate_limited metrics.
+        // Unknown resource → INVALID_PARAMS (-32602), the code 2026-07-28
+        // prescribes. Never -32002: that was resource-not-found in 2025-11-25
+        // and earlier, and the current revision forbids emitting it.
         if ($articleId === null) {
             return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'Resource not found: ' . $uri);
         }
@@ -569,9 +750,7 @@ class RpcService
                 'error' => $e->getMessage(),
             ]);
 
-            $clientMessage = ($e instanceof \InvalidArgumentException || $e instanceof \RuntimeException)
-                ? $e->getMessage()
-                : 'Resource read failed due to an internal error';
+            $clientMessage = $this->clientErrorMessage($e, 'Resource read failed due to an internal error');
 
             return JsonRpc::errorResponse($id, JsonRpc::INTERNAL_ERROR, $clientMessage);
         }
@@ -687,13 +866,12 @@ class RpcService
                 'error' => $e->getMessage(),
             ]);
 
-            if ($e instanceof \InvalidArgumentException) {
+            // Exactly the class a builder throws for a bad argument; see clientErrorMessage().
+            if (get_class($e) === \InvalidArgumentException::class) {
                 return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, $e->getMessage());
             }
 
-            $clientMessage = $e instanceof \RuntimeException
-                ? $e->getMessage()
-                : 'Prompt build failed due to an internal error';
+            $clientMessage = $this->clientErrorMessage($e, 'Prompt build failed due to an internal error');
 
             return JsonRpc::errorResponse($id, JsonRpc::INTERNAL_ERROR, $clientMessage);
         }
@@ -845,13 +1023,17 @@ class RpcService
         ];
     }
 
-    private function handleCallTool(mixed $id, array $params): array
+    private function handleCallTool(mixed $id, array $params, bool $modern = false): array
     {
         $toolName = $params['name'] ?? '';
         $toolParams = $params['arguments'] ?? [];
 
-        if (empty($toolName)) {
+        if (!is_string($toolName) || $toolName === '') {
             return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'Tool name is required');
+        }
+
+        if (!is_array($toolParams) || ($toolParams !== [] && array_is_list($toolParams))) {
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'Tool arguments must be an object');
         }
 
         if (!$this->policy->isToolAllowed($toolName)) {
@@ -864,7 +1046,7 @@ class RpcService
 
         $tool = $this->toolRegistry->get($toolName);
         if ($tool === null) {
-            return JsonRpc::errorResponse($id, JsonRpc::METHOD_NOT_FOUND, 'Tool not found');
+            return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'Unknown tool: ' . $toolName);
         }
 
         if ($this->policy->isReadOnly() && ($tool['annotations']['readOnlyHint'] ?? false) !== true) {
@@ -879,7 +1061,13 @@ class RpcService
         if (isset($tool['inputSchema'])) {
             $validationError = $this->validator->validate($toolParams, $tool['inputSchema']);
             if ($validationError !== null) {
-                return JsonRpc::errorResponse($id, JsonRpc::INVALID_PARAMS, 'Invalid parameters: ' . $validationError);
+                // A tool execution error, not a protocol error (SEP-1303): only
+                // a result reaches the model, which can then fix its arguments.
+                // Flagged failed so the audit row reads 'error', as it did when
+                // this was a JSON-RPC error.
+                $this->lastCallFailed = true;
+
+                return JsonRpc::successResponse($id, $this->formatToolError('Invalid parameters: ' . $validationError));
             }
         }
 
@@ -901,7 +1089,7 @@ class RpcService
         try {
             $result = $this->toolRegistry->execute($toolName, $toolParams);
 
-            return JsonRpc::successResponse($id, $this->formatToolSuccess($result));
+            return JsonRpc::successResponse($id, $this->formatToolSuccess($result, $modern));
         } catch (\Throwable $e) {
             // Mark the call failed so the caller does not audit this as 'ok':
             // the response below is a JSON-RPC success envelope carrying an
@@ -918,9 +1106,7 @@ class RpcService
             // safe and actionable. For anything unexpected (PHP errors, DB driver
             // exceptions, Guzzle transport errors) return a generic message so
             // internal details — paths, SQL, upstream URLs — are not disclosed.
-            $clientMessage = ($e instanceof \InvalidArgumentException || $e instanceof \RuntimeException)
-                ? $e->getMessage()
-                : 'Tool execution failed due to an internal error';
+            $clientMessage = $this->clientErrorMessage($e, 'Tool execution failed due to an internal error');
 
             return JsonRpc::successResponse($id, $this->formatToolError($clientMessage));
         }
@@ -4559,7 +4745,7 @@ class RpcService
     /**
      * @return array<string, mixed>
      */
-    private function formatToolSuccess(mixed $result): array
+    private function formatToolSuccess(mixed $result, bool $modern = false): array
     {
         $response = [
             'content' => [
@@ -4570,7 +4756,11 @@ class RpcService
             ],
         ];
 
-        if (is_array($result)) {
+        // structuredContent must be a JSON object before 2026-07-28 and may be
+        // any JSON value from then on. A PHP list encodes as an array, and [] —
+        // also what RestClient returns for an empty body — is ambiguous, so it
+        // is never sent; the text block above still carries the result.
+        if (is_array($result) && $result !== [] && ($modern || !array_is_list($result))) {
             $response['structuredContent'] = $result;
         }
 
@@ -4580,6 +4770,91 @@ class RpcService
     /**
      * @return array<string, mixed>
      */
+    /**
+     * The failure text a caller may see.
+     *
+     * This component marks a deliberate, caller-safe message by throwing a plain
+     * \InvalidArgumentException or \RuntimeException, and the class must match
+     * exactly: Guzzle's transfer exceptions, Joomla's database and filesystem
+     * exceptions and PDOException all *extend* \RuntimeException, and their
+     * messages carry upstream URLs, cURL diagnostics, SQL and file paths.
+     */
+    private function clientErrorMessage(\Throwable $e, string $fallback): string
+    {
+        if ($e instanceof GuzzleException) {
+            return $this->describeHttpFailure($e);
+        }
+
+        $class = get_class($e);
+
+        return $class === \InvalidArgumentException::class || $class === \RuntimeException::class
+            ? $e->getMessage()
+            : $fallback;
+    }
+
+    /**
+     * What went wrong with an outbound HTTP call, without its URL or transport
+     * detail. Joomla's own JSON:API error titles are kept: they are what the Web
+     * Services API chose to tell this same caller (a duplicate alias, a missing
+     * permission), and what lets the model correct its call.
+     */
+    private function describeHttpFailure(GuzzleException $e): string
+    {
+        // upload_media and install_extension fetch URLs the caller supplied;
+        // failures there are not the API's.
+        $toApi = true;
+        if ($e instanceof RequestException || $e instanceof ConnectException) {
+            $baseUrl = $this->rest->getBaseUrl();
+            $toApi = $baseUrl === '' || str_starts_with((string) $e->getRequest()->getUri(), $baseUrl);
+        }
+        $target = $toApi ? 'The Joomla Web Services API' : 'The requested URL';
+
+        if ($e instanceof RequestException && $e->hasResponse()) {
+            $response = $e->getResponse();
+            $message = $target . ' returned HTTP ' . $response->getStatusCode();
+            // A third party's response body is not this component's to repeat.
+            $detail = $toApi ? $this->joomlaApiErrorTitles((string) $response->getBody()) : '';
+
+            return $detail !== '' ? $message . ': ' . $detail : $message;
+        }
+
+        return $toApi
+            ? $target . ' could not be reached. Check the Base URL and Resolve Host To IP settings in MCP Server options.'
+            : $target . ' could not be reached';
+    }
+
+    /**
+     * The titles of a Joomla JSON:API error document ({"errors":[{"title":…}]}),
+     * joined; '' for any other body — an HTML error page or a PHP fatal error is
+     * exactly the kind of internal detail that must not be passed on.
+     */
+    private function joomlaApiErrorTitles(string $body): string
+    {
+        try {
+            $document = json_decode($body, true, 16, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return '';
+        }
+
+        if (!is_array($document) || !is_array($document['errors'] ?? null)) {
+            return '';
+        }
+
+        $titles = [];
+        foreach ($document['errors'] as $error) {
+            $title = is_array($error) && is_string($error['title'] ?? null)
+                ? trim((string) preg_replace('/\s+/', ' ', strip_tags($error['title'])))
+                : '';
+            if ($title !== '') {
+                $titles[] = $title;
+            }
+        }
+
+        $text = implode('; ', array_unique($titles));
+
+        return mb_strlen($text) > 500 ? mb_substr($text, 0, 500) . '…' : $text;
+    }
+
     private function formatToolError(string $message): array
     {
         return [

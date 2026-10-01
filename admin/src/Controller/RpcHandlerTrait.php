@@ -24,6 +24,8 @@ use Joomla\Component\Mcpserver\Administrator\Service\GovernedToolAuthorizer;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaActionLogService;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
 use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
+use Joomla\Component\Mcpserver\Administrator\Service\McpHttpTransport;
+use Joomla\Component\Mcpserver\Administrator\Service\McpProtocolError;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
@@ -75,6 +77,11 @@ trait RpcHandlerTrait
                 $startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null
             );
             $app->close();
+            return;
+        }
+
+        if (!$this->isOriginAcceptable($params)) {
+            $this->rejectOrigin($startTime, $clientIp, $context);
             return;
         }
 
@@ -181,8 +188,15 @@ trait RpcHandlerTrait
     {
         $app = Factory::getApplication();
         $sessionId = $app->input->get('sessionId', '', 'string');
+        $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $mcpHeaders = McpHttpTransport::headersFromServer($_SERVER);
 
-        if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($sessionId)) {
+        // A GET without MCP-Protocol-Version opens the legacy 2024-11-05 HTTP+SSE
+        // stream. Streamable HTTP clients from 2025-06-18 on send the header and
+        // fall through to the 405 below: this server has nothing to push on a
+        // standalone stream, and sse() would pin a worker for 300 s. (2025-03-26
+        // clients predate the header and cannot be told apart from 2024-11-05.)
+        if ($requestMethod === 'GET' && empty($sessionId) && !isset($mcpHeaders['mcp-protocol-version'])) {
             $this->sse();
             return;
         }
@@ -195,6 +209,15 @@ trait RpcHandlerTrait
         $params = ComponentHelper::getParams('com_mcpserver');
 
         $this->handleCors($params);
+
+        // MCP messages are POSTed. There are no sessions for a DELETE to end, and
+        // GET survives only for the legacy stream handled above.
+        if ($requestMethod !== 'POST') {
+            header('Allow: GET, POST, OPTIONS');
+            http_response_code(405);
+            $app->close();
+            return;
+        }
 
         $authService = $this->resolveService(AuthService::class) ?? new AuthService($params);
         $clientIp    = $authService->getClientIp() ?: 'unknown';
@@ -209,6 +232,13 @@ trait RpcHandlerTrait
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::RATE_LIMITED, 'Rate limit exceeded'));
             $this->recordGovernanceAudit($startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null);
             $app->close();
+            return;
+        }
+
+        // After the rate limit, so a flood of rejected origins is throttled too,
+        // and before auth, so a hostile page never gets a token checked.
+        if (!$this->isOriginAcceptable($params)) {
+            $this->rejectOrigin($startTime, $clientIp, $context);
             return;
         }
 
@@ -230,15 +260,23 @@ trait RpcHandlerTrait
         $body = file_get_contents('php://input') ?: '';
         $decoded = json_decode($body, true);
 
-        // Governed mode: each principal must use their own Joomla API token, not
-        // the shared configured one, so a per-request RpcService is built against
-        // a per-principal RestClient rather than the DI container's shared service.
-        $rpcService = $principal !== null
-            ? $this->createRpcServiceForPrincipal($params, $principal)
-            : ($this->resolveService(RpcService::class) ?? $this->createRpcService($params));
+        if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
+            http_response_code(400);
+            echo json_encode(JsonRpc::errorResponse(null, JsonRpc::PARSE_ERROR, 'Parse error'));
+            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::PARSE_ERROR, 400, $clientIp, $context, $principal, null, null);
+            $app->close();
+            return;
+        }
 
         if (JsonRpc::isBatch($decoded)) {
-            $this->handleBatch($decoded, $rpcService, $startTime, $clientIp, $context, $sessionId, $principal);
+            try {
+                McpHttpTransport::validateBatch($decoded, $mcpHeaders);
+            } catch (McpProtocolError $e) {
+                $this->rejectProtocolError($e, null, '', '', $startTime, $clientIp, $context, $principal);
+                return;
+            }
+
+            $this->handleBatch($decoded, $this->rpcServiceFor($params, $principal), $startTime, $clientIp, $context, $sessionId, $mcpHeaders, $principal);
             return;
         }
 
@@ -255,7 +293,29 @@ trait RpcHandlerTrait
         $method   = (string) ($request['method'] ?? '');
         $toolName = $this->extractToolName($request);
 
-        $response = $rpcService->handle($request);
+        try {
+            McpHttpTransport::validate($request, $mcpHeaders);
+        } catch (McpProtocolError $e) {
+            $this->rejectProtocolError(
+                $e,
+                $request['id'] ?? null,
+                $method,
+                $toolName,
+                $startTime,
+                $clientIp,
+                $context,
+                $principal,
+                $this->extractRequestId($request)
+            );
+            return;
+        }
+
+        // Built only once the request has passed validation: in Governed Mode this
+        // decrypts the principal's API token, work a rejected request never needs.
+        $rpcService = $this->rpcServiceFor($params, $principal);
+
+        [$response, $dispatchFailed] = $this->dispatchToService($rpcService, $request, $method);
+        $streamNotifications = $rpcService->takeStreamNotifications();
 
         // Policy denials (disabled tool, read-only mode) and tool execution
         // failures are MCP tool results with isError=true, not JSON-RPC errors,
@@ -268,14 +328,15 @@ trait RpcHandlerTrait
         };
 
         if ($response === null) {
-            http_response_code(204);
+            $notificationStatus = McpHttpTransport::notificationStatus($mcpHeaders);
+            http_response_code($notificationStatus);
             $this->recordGovernanceAudit(
                 $startTime,
                 $method,
                 $toolName,
                 $okStatus,
                 null,
-                204,
+                $notificationStatus,
                 $clientIp,
                 $context,
                 $principal,
@@ -286,20 +347,14 @@ trait RpcHandlerTrait
             return;
         }
 
-        $httpStatus = 200;
-        if (isset($response['error'])) {
-            $httpStatus = match ($response['error']['code']) {
-                JsonRpc::UNAUTHORIZED => 401,
-                JsonRpc::RATE_LIMITED => 429,
-                default => 200,
-            };
-        }
+        // Settled before the audit write so the row records what is sent.
+        $httpStatus = $dispatchFailed ? 500 : McpHttpTransport::responseStatus($rpcService->getLastHttpStatus(), $response);
 
         $this->recordGovernanceAudit(
             $startTime,
             $method,
             $toolName,
-            isset($response['error']) ? 'error' : $okStatus,
+            McpHttpTransport::auditStatus($response, $httpStatus, $okStatus),
             $response['error']['code'] ?? null,
             $httpStatus,
             $clientIp,
@@ -319,6 +374,14 @@ trait RpcHandlerTrait
             $sseCache->set(PrincipalCache::sessionKeyFor($sessionId, $principal), $jsonResponse, 30);
             http_response_code(202);
             echo json_encode(['status' => 'accepted', 'sessionId' => $sessionId]);
+        } elseif ($streamNotifications !== []) {
+            // Request-scoped notifications precede the response on its own
+            // stream (subscriptions/listen's acknowledgement, for one).
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            http_response_code($httpStatus);
+            echo McpHttpTransport::sseFrames([...$streamNotifications, $response]);
         } else {
             http_response_code($httpStatus);
             echo $jsonResponse;
@@ -328,10 +391,105 @@ trait RpcHandlerTrait
     }
 
     /**
+     * Governed mode: each principal must use their own Joomla API token, not the
+     * shared configured one, so a per-request RpcService is built against a
+     * per-principal RestClient rather than the DI container's shared service.
+     */
+    private function rpcServiceFor(Registry $params, ?AuthenticatedPrincipal $principal): RpcService
+    {
+        return $principal !== null
+            ? $this->createRpcServiceForPrincipal($params, $principal)
+            : ($this->resolveService(RpcService::class) ?? $this->createRpcService($params));
+    }
+
+    /**
+     * Run one request through the service. The handlers validate their own
+     * params, but an unexpected throwable must still produce a JSON-RPC error
+     * and an audit row rather than an HTML error page and nothing.
+     *
+     * @return array{0: ?array, 1: bool}  the response, and whether dispatch threw
+     */
+    private function dispatchToService(RpcService $rpcService, array $request, string $method): array
+    {
+        try {
+            return [$rpcService->handle($request), false];
+        } catch (\Throwable $e) {
+            $this->resolveService(LoggerInterface::class)?->error('RPC dispatch failed', [
+                'method' => $method,
+                'error'  => $e->getMessage(),
+            ]);
+
+            return [JsonRpc::errorResponse($request['id'] ?? null, JsonRpc::INTERNAL_ERROR, 'Internal error'), true];
+        }
+    }
+
+    /**
+     * Reply to a request rejected at the protocol layer (unsupported version,
+     * header mismatch, a modern batch) and audit it as an invalid request.
+     */
+    private function rejectProtocolError(
+        McpProtocolError $error,
+        mixed $id,
+        string $method,
+        string $toolName,
+        float $startTime,
+        string $clientIp,
+        string $context,
+        ?AuthenticatedPrincipal $principal,
+        ?string $requestId = null
+    ): void {
+        http_response_code($error->httpStatus);
+        echo json_encode($error->toResponse($id), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $this->recordGovernanceAudit(
+            $startTime,
+            $method,
+            $toolName,
+            'invalid_request',
+            $error->jsonRpcCode,
+            $error->httpStatus,
+            $clientIp,
+            $context,
+            $principal,
+            $requestId,
+            null
+        );
+        Factory::getApplication()->close();
+    }
+
+    /**
+     * An absent Origin is a non-browser client; a present one must be in the
+     * Allowed Origins list (DNS-rebinding protection — see isOriginAllowed()).
+     */
+    private function isOriginAcceptable(Registry $params): bool
+    {
+        $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
+
+        return $origin === '' || McpHttpTransport::isOriginAllowed($origin, $this->allowedOrigins($params));
+    }
+
+    private function rejectOrigin(float $startTime, string $clientIp, string $context): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(403);
+        echo json_encode(JsonRpc::errorResponse(null, JsonRpc::FORBIDDEN, 'Origin not allowed'));
+        $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::FORBIDDEN, 403, $clientIp, $context, null, null, null);
+        Factory::getApplication()->close();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function allowedOrigins(Registry $params): array
+    {
+        return array_values(array_filter(array_map('trim', explode(',', (string) $params->get('allowed_origins', '')))));
+    }
+
+    /**
      * Handle a JSON-RPC 2.0 batch request (required by MCP protocol revision
-     * 2025-03-26; removed again in 2025-06-18 but harmless to keep supporting).
+     * 2025-03-26; removed again in 2025-06-18 and forbidden in 2026-07-28, so
+     * batches carrying a modern request are rejected before reaching here).
      * Entries are dispatched independently; notification entries produce no
-     * response, and an all-notification batch yields 204.
+     * response, and an all-notification batch is accepted without a body.
      */
     private function handleBatch(
         array $batch,
@@ -340,6 +498,7 @@ trait RpcHandlerTrait
         string $clientIp,
         string $context,
         string $sessionId,
+        array $mcpHeaders,
         ?AuthenticatedPrincipal $principal = null
     ): void {
         $app = Factory::getApplication();
@@ -354,7 +513,7 @@ trait RpcHandlerTrait
                 continue;
             }
 
-            $response = $rpcService->handle($request);
+            [$response] = $this->dispatchToService($rpcService, $request, (string) ($request['method'] ?? ''));
 
             // See handle(): policy denials and tool failures are tool results,
             // not JSON-RPC errors.
@@ -387,7 +546,7 @@ trait RpcHandlerTrait
         }
 
         if (empty($responses)) {
-            http_response_code(204);
+            http_response_code(McpHttpTransport::notificationStatus($mcpHeaders));
             $app->close();
             return;
         }
@@ -409,7 +568,7 @@ trait RpcHandlerTrait
 
     private function handleCors(Registry $params): void
     {
-        $allowedOrigins = array_filter(array_map('trim', explode(',', (string) $params->get('allowed_origins', ''))));
+        $allowedOrigins = $this->allowedOrigins($params);
 
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
@@ -419,9 +578,10 @@ trait RpcHandlerTrait
         }
 
         header('Access-Control-Allow-Methods: POST, OPTIONS');
-        // Mcp-Session-Id / MCP-Protocol-Version are sent by Streamable HTTP MCP
-        // clients; without them here, browser-based clients fail CORS preflight.
-        header('Access-Control-Allow-Headers: Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version');
+        // Streamable HTTP clients send these (Mcp-Method and Mcp-Name are required
+        // from 2026-07-28; Mcp-Session-Id by 2025-03-26..2025-11-25 clients);
+        // without them here, browser-based clients fail CORS preflight.
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
         header('Access-Control-Max-Age: 3600');
 
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -482,11 +642,15 @@ trait RpcHandlerTrait
     {
         $params = is_array($request['params'] ?? null) ? $request['params'] : [];
 
-        return match ($request['method'] ?? '') {
-            'tools/call', 'prompts/get' => (string) ($params['name'] ?? ''),
-            'resources/read' => (string) ($params['uri'] ?? ''),
+        // Runs before RpcService rejects malformed params, so a non-string name
+        // must not be cast (an array would log a conversion warning).
+        $label = match ($request['method'] ?? '') {
+            'tools/call', 'prompts/get' => $params['name'] ?? '',
+            'resources/read' => $params['uri'] ?? '',
             default => '',
         };
+
+        return is_string($label) ? $label : '';
     }
 
     /**

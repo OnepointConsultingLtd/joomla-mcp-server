@@ -216,6 +216,7 @@ final class GovernanceAuditQueryServiceTest extends TestCase
         $this->assertContains('audit.status', $columns);
         $this->assertContains('audit.user_id', $columns);
         $this->assertContains('audit.target', $columns);
+        $this->assertContains('audit.protocol_version', $columns);
         $this->assertContains('users.name` AS `user_name', $columns);
     }
 

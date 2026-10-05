@@ -121,15 +121,16 @@ class MetricsService
             }
 
             $row = (object) [
-                'created'     => (string) ($data['created'] ?? Factory::getDate()->toSql()),
-                'method'      => substr((string) ($data['method'] ?? ''), 0, 64),
-                'tool_name'   => substr((string) ($data['tool_name'] ?? ''), 0, 128),
-                'status'      => $status,
-                'error_code'  => isset($data['error_code']) ? (int) $data['error_code'] : null,
-                'http_status' => (int) ($data['http_status'] ?? 0),
-                'duration_ms' => max(0, (int) ($data['duration_ms'] ?? 0)),
-                'client_ip'   => substr((string) ($data['client_ip'] ?? ''), 0, 45),
-                'context'     => substr((string) ($data['context'] ?? ''), 0, 10),
+                'created'          => (string) ($data['created'] ?? Factory::getDate()->toSql()),
+                'method'           => substr((string) ($data['method'] ?? ''), 0, 64),
+                'tool_name'        => substr((string) ($data['tool_name'] ?? ''), 0, 128),
+                'status'           => $status,
+                'error_code'       => isset($data['error_code']) ? (int) $data['error_code'] : null,
+                'http_status'      => (int) ($data['http_status'] ?? 0),
+                'duration_ms'      => max(0, (int) ($data['duration_ms'] ?? 0)),
+                'client_ip'        => substr((string) ($data['client_ip'] ?? ''), 0, 45),
+                'context'          => substr((string) ($data['context'] ?? ''), 0, 10),
+                'protocol_version' => isset($data['protocol_version']) ? substr((string) $data['protocol_version'], 0, 20) : null,
             ];
 
             $db = Factory::getDbo();

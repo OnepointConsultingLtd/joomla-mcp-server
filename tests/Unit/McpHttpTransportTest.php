@@ -342,6 +342,36 @@ class McpHttpTransportTest extends TestCase
         ];
     }
 
+    /**
+     * @return array<string, array{0: array<string, mixed>, 1: array<string, string>, 2: ?string}>
+     */
+    public static function protocolVersionCases(): array
+    {
+        $meta = static fn (mixed $version): array => ['_meta' => ['io.modelcontextprotocol/protocolVersion' => $version]];
+
+        return [
+            'modern request' => [
+                ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => $meta('2026-07-28')],
+                ['mcp-protocol-version' => '2026-07-28'],
+                '2026-07-28',
+            ],
+            'legacy request with header only' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'], ['mcp-protocol-version' => '2025-06-18'], '2025-06-18'],
+            'legacy version declared in body only' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => $meta('2025-11-25')], [], '2025-11-25'],
+            'initialize records the answered version' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-03-26']], [], '2025-03-26'],
+            'initialize asking for a modern version is answered legacy' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2026-07-28']], [], '2025-11-25'],
+            'pre-header client' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'], [], null],
+            'unsupported header' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'], ['mcp-protocol-version' => '1999-01-01'], null],
+            'non-string body version' => [['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => $meta(['2026-07-28'])], [], null],
+            'unparsed body, header only' => [[], ['mcp-protocol-version' => '2026-07-28'], '2026-07-28'],
+        ];
+    }
+
+    #[DataProvider('protocolVersionCases')]
+    public function testProtocolVersionFor(array $request, array $headers, ?string $expected): void
+    {
+        $this->assertSame($expected, McpHttpTransport::protocolVersionFor($request, $headers));
+    }
+
     public function testSseFramesEmitOneMessageEventPerMessageInOrder(): void
     {
         $frames = McpHttpTransport::sseFrames([

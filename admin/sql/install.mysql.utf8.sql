@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS `#__mcpserver_request_log` (
   `user_id`             INT(11) UNSIGNED NULL DEFAULT NULL,
   `credential_selector` VARCHAR(32)  NULL DEFAULT NULL,
   `target`              VARCHAR(255) NULL DEFAULT NULL,
+  `protocol_version`    VARCHAR(20)  NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_created` (`created`),
   KEY `idx_method` (`method`),

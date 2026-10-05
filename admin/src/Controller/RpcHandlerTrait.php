@@ -204,6 +204,9 @@ trait RpcHandlerTrait
 
         $startTime = microtime(true);
         $context   = $app->getName() === 'administrator' ? 'admin' : 'site';
+        // What the rows written before a message is parsed (rate limit, origin,
+        // auth, parse errors) can know of the protocol revision.
+        $headerVersion = McpHttpTransport::protocolVersionFor([], $mcpHeaders);
 
         header('Content-Type: application/json; charset=utf-8');
 
@@ -231,7 +234,7 @@ trait RpcHandlerTrait
             header('Retry-After: ' . $rateLimit['retry_after']);
             http_response_code(429);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::RATE_LIMITED, 'Rate limit exceeded'));
-            $this->recordGovernanceAudit($startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null);
+            $this->recordGovernanceAudit($startTime, '', '', 'rate_limited', JsonRpc::RATE_LIMITED, 429, $clientIp, $context, null, null, null, $headerVersion);
             $app->close();
             return;
         }
@@ -239,7 +242,7 @@ trait RpcHandlerTrait
         // After the rate limit, so a flood of rejected origins is throttled too,
         // and before auth, so a hostile page never gets a token checked.
         if (!$this->isOriginAcceptable($params)) {
-            $this->rejectOrigin($startTime, $clientIp, $context);
+            $this->rejectOrigin($startTime, $clientIp, $context, $headerVersion);
             return;
         }
 
@@ -253,7 +256,7 @@ trait RpcHandlerTrait
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
             http_response_code($code);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
-            $this->recordGovernanceAudit($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context, null, null, null);
+            $this->recordGovernanceAudit($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context, null, null, null, $headerVersion);
             $app->close();
             return;
         }
@@ -264,7 +267,7 @@ trait RpcHandlerTrait
         if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
             http_response_code(400);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::PARSE_ERROR, 'Parse error'));
-            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::PARSE_ERROR, 400, $clientIp, $context, $principal, null, null);
+            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::PARSE_ERROR, 400, $clientIp, $context, $principal, null, null, $headerVersion);
             $app->close();
             return;
         }
@@ -273,7 +276,7 @@ trait RpcHandlerTrait
             try {
                 McpHttpTransport::validateBatch($decoded, $mcpHeaders);
             } catch (McpProtocolError $e) {
-                $this->rejectProtocolError($e, null, '', '', $startTime, $clientIp, $context, $principal);
+                $this->rejectProtocolError($e, null, '', '', $startTime, $clientIp, $context, $principal, null, $headerVersion);
                 return;
             }
 
@@ -286,13 +289,14 @@ trait RpcHandlerTrait
         if ($request === null) {
             http_response_code(400);
             echo json_encode(JsonRpc::errorResponse(null, JsonRpc::INVALID_REQUEST, 'Invalid JSON-RPC 2.0 request'));
-            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 400, $clientIp, $context, $principal, null, null);
+            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 400, $clientIp, $context, $principal, null, null, $headerVersion);
             $app->close();
             return;
         }
 
-        $method   = (string) ($request['method'] ?? '');
-        $toolName = $this->extractToolName($request);
+        $method          = (string) ($request['method'] ?? '');
+        $toolName        = $this->extractToolName($request);
+        $protocolVersion = McpHttpTransport::protocolVersionFor($request, $mcpHeaders);
 
         try {
             McpHttpTransport::validate($request, $mcpHeaders);
@@ -307,7 +311,8 @@ trait RpcHandlerTrait
                 $clientIp,
                 $context,
                 $principal,
-                $this->extractRequestId($request)
+                $this->extractRequestId($request),
+                $protocolVersion
             );
             return;
         }
@@ -353,7 +358,8 @@ trait RpcHandlerTrait
                 $context,
                 $principal,
                 $this->extractRequestId($request),
-                $this->extractMutationTarget($request)
+                $this->extractMutationTarget($request),
+                $protocolVersion
             );
             $app->close();
             return;
@@ -378,7 +384,8 @@ trait RpcHandlerTrait
             $context,
             $principal,
             $this->extractRequestId($request),
-            $this->extractMutationTarget($request)
+            $this->extractMutationTarget($request),
+            $protocolVersion
         );
 
         if ($progressSink?->hasStarted() === true) {
@@ -486,7 +493,8 @@ trait RpcHandlerTrait
         string $clientIp,
         string $context,
         ?AuthenticatedPrincipal $principal,
-        ?string $requestId = null
+        ?string $requestId = null,
+        ?string $protocolVersion = null
     ): void {
         http_response_code($error->httpStatus);
         echo json_encode($error->toResponse($id), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -501,7 +509,8 @@ trait RpcHandlerTrait
             $context,
             $principal,
             $requestId,
-            null
+            null,
+            $protocolVersion
         );
         Factory::getApplication()->close();
     }
@@ -517,12 +526,12 @@ trait RpcHandlerTrait
         return $origin === '' || McpHttpTransport::isOriginAllowed($origin, $this->allowedOrigins($params));
     }
 
-    private function rejectOrigin(float $startTime, string $clientIp, string $context): void
+    private function rejectOrigin(float $startTime, string $clientIp, string $context, ?string $protocolVersion = null): void
     {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(403);
         echo json_encode(JsonRpc::errorResponse(null, JsonRpc::FORBIDDEN, 'Origin not allowed'));
-        $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::FORBIDDEN, 403, $clientIp, $context, null, null, null);
+        $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::FORBIDDEN, 403, $clientIp, $context, null, null, null, $protocolVersion);
         Factory::getApplication()->close();
     }
 
@@ -559,7 +568,7 @@ trait RpcHandlerTrait
 
             if ($request === null) {
                 $responses[] = JsonRpc::errorResponse(null, JsonRpc::INVALID_REQUEST, 'Invalid JSON-RPC 2.0 request');
-                $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 200, $clientIp, $context, $principal, null, null);
+                $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 200, $clientIp, $context, $principal, null, null, McpHttpTransport::protocolVersionFor([], $mcpHeaders));
                 continue;
             }
 
@@ -587,7 +596,8 @@ trait RpcHandlerTrait
                 $context,
                 $principal,
                 $this->extractRequestId($request),
-                $this->extractMutationTarget($request)
+                $this->extractMutationTarget($request),
+                McpHttpTransport::protocolVersionFor($request, $mcpHeaders)
             );
 
             if ($response !== null) {
@@ -667,21 +677,23 @@ trait RpcHandlerTrait
         ?int $errorCode,
         int $httpStatus,
         string $clientIp,
-        string $context
+        string $context,
+        ?string $protocolVersion = null
     ): void {
         $metrics = $this->resolveService(MetricsService::class)
             ?? $this->createMetricsService(ComponentHelper::getParams('com_mcpserver'));
 
         $metrics->record([
-            'created'     => Factory::getDate()->toSql(),
-            'method'      => $method,
-            'tool_name'   => $toolName,
-            'status'      => $status,
-            'error_code'  => $errorCode,
-            'http_status' => $httpStatus,
-            'duration_ms' => (int) round((microtime(true) - $startTime) * 1000),
-            'client_ip'   => $clientIp,
-            'context'     => $context,
+            'created'          => Factory::getDate()->toSql(),
+            'method'           => $method,
+            'tool_name'        => $toolName,
+            'status'           => $status,
+            'error_code'       => $errorCode,
+            'http_status'      => $httpStatus,
+            'duration_ms'      => (int) round((microtime(true) - $startTime) * 1000),
+            'client_ip'        => $clientIp,
+            'context'          => $context,
+            'protocol_version' => $protocolVersion,
         ]);
     }
 
@@ -809,14 +821,15 @@ trait RpcHandlerTrait
         string $context,
         ?AuthenticatedPrincipal $principal,
         ?string $requestId,
-        ?string $target
+        ?string $target,
+        ?string $protocolVersion = null
     ): void {
         $audit = $this->resolveService(GovernanceAuditService::class);
 
         if ($audit === null) {
             // No container: fall back to the base-column writer so the request
             // is still logged, just without attribution.
-            $this->recordMetric($startTime, $method, $toolName, $status, $errorCode, $httpStatus, $clientIp, $context);
+            $this->recordMetric($startTime, $method, $toolName, $status, $errorCode, $httpStatus, $clientIp, $context, $protocolVersion);
         } else {
             try {
                 $audit->record(
@@ -831,6 +844,7 @@ trait RpcHandlerTrait
                     principal: $principal,
                     requestId: $requestId,
                     target: $target,
+                    protocolVersion: $protocolVersion,
                 );
             } catch (\Throwable $e) {
                 // Must not disrupt the RPC response, but must not vanish either:

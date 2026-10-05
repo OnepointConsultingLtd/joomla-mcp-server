@@ -294,6 +294,39 @@ final class McpHttpTransport
     }
 
     /**
+     * The protocol revision a request was served under, for the request log;
+     * null when the request does not say. 2024-11-05 and 2025-03-26 clients
+     * send no MCP-Protocol-Version header after initialize, so their traffic
+     * cannot be attributed to a revision.
+     *
+     * initialize records the version answered, which is what the session then
+     * runs on. Otherwise the body's _meta wins over the header: validate()
+     * requires the two to agree on a modern request, and a legacy client may
+     * declare a version in _meta without the header. Only supported values are
+     * returned, so the log never holds caller-chosen text.
+     *
+     * @param  array<string, mixed>   $request  the decoded message, or [] when none was parsed
+     * @param  array<string, string>  $headers  lowercase header name => value
+     */
+    public static function protocolVersionFor(array $request, array $headers): ?string
+    {
+        $params = is_array($request['params'] ?? null) ? $request['params'] : [];
+
+        if (($request['method'] ?? null) === 'initialize') {
+            return McpProtocol::negotiateLegacy($params['protocolVersion'] ?? null);
+        }
+
+        $meta = is_array($params['_meta'] ?? null) ? $params['_meta'] : [];
+        foreach ([$meta[McpProtocol::META_PROTOCOL_VERSION] ?? null, $headers['mcp-protocol-version'] ?? null] as $version) {
+            if (McpProtocol::isSupported($version)) {
+                return $version;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * HTTP status for a JSON-RPC response: the status RpcService attached to a
      * protocol-level outcome, else the legacy mapping of in-body error codes.
      *

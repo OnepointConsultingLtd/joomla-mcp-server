@@ -32,7 +32,8 @@ use Joomla\Registry\Registry;
  * that fail authentication before a principal is resolved, are recorded
  * with null attribution rather than being dropped. The row never carries a
  * token, secret, or arbitrary request/response content — only caller-supplied
- * identifiers (method, tool name, JSON-RPC request id, target), all of which
+ * identifiers (method, tool name, JSON-RPC request id, target) and the
+ * protocol revision (only ever a supported one), all of which
  * are length-bounded and SQL-quoted; `target` is additionally stripped of
  * control characters.
  */
@@ -91,6 +92,7 @@ final class GovernanceAuditService
         ?AuthenticatedPrincipal $principal = null,
         ?string $requestId = null,
         ?string $target = null,
+        ?string $protocolVersion = null,
     ): void {
         if (!$this->shouldRecord($principal)) {
             return;
@@ -116,6 +118,7 @@ final class GovernanceAuditService
             'user_id',
             'credential_selector',
             'target',
+            'protocol_version',
         ];
 
         $values = [
@@ -133,6 +136,7 @@ final class GovernanceAuditService
             $this->quoteNullableInt($principal?->userId),
             $this->quoteNullableString($principal?->selector, 128),
             $this->quoteNullableString(self::sanitizeTarget($target), self::TARGET_MAX_LENGTH),
+            $this->quoteNullableString($protocolVersion, 20),
         ];
 
         $query = $db->getQuery(true)

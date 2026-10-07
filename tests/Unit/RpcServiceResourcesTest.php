@@ -203,6 +203,22 @@ class RpcServiceResourcesTest extends TestCase
         $this->assertSame('Resources are disabled by server policy', $response['error']['message']);
     }
 
+    public function testListResourcesAnnotatesLastModified(): void
+    {
+        $rest = $this->createRestMock();
+        $rest->method('get')->willReturn(['data' => [
+            ['id' => 3, 'attributes' => ['title' => 'A', 'alias' => 'a', 'introtext' => '', 'modified' => '2026-09-01 10:00:00']],
+            ['id' => 2, 'attributes' => ['title' => 'B', 'alias' => 'b', 'introtext' => '', 'modified' => '0000-00-00 00:00:00']],
+            ['id' => 1, 'attributes' => ['title' => 'C', 'alias' => 'c', 'introtext' => '']],
+        ]]);
+
+        $resources = $this->makeService($rest, true)->handle($this->rpc('resources/list'))['result']['resources'];
+
+        $this->assertSame(['lastModified' => '2026-09-01T10:00:00+00:00'], $resources[0]['annotations']);
+        $this->assertArrayNotHasKey('annotations', $resources[1], 'a zero date is no date');
+        $this->assertArrayNotHasKey('annotations', $resources[2]);
+    }
+
     /**
      * @return RestClient&MockObject
      */

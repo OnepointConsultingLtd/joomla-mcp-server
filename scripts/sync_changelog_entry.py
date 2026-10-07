@@ -122,9 +122,11 @@ def main() -> None:
     span = find_changelog_block(xml, version)
 
     if span is None:
+        # A function replacement, because the block is changelog prose: a string
+        # template would read backslashes in it (e.g. \RuntimeException) as escapes.
         xml = re.sub(
             r"(<changelogs>\n)",
-            r"\1" + new_block + "\n",
+            lambda match: match.group(1) + new_block + "\n",
             xml,
             count=1,
         )

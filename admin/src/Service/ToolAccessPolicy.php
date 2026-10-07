@@ -101,6 +101,8 @@ final class ToolAccessPolicy
         'get_rendered_page' => ['kind' => self::DIRECT, 'component' => null, 'action' => null, 'special' => 'rendered_page'],
         'seo_audit_articles' => ['kind' => self::API, 'component' => null, 'action' => null],
         'check_internal_links' => ['kind' => self::DIRECT, 'component' => 'com_content', 'action' => 'core.manage'],
+        // Mirrors com_admin, which serves System Information to core.admin only.
+        'get_system_information' => ['kind' => self::DIRECT, 'component' => null, 'action' => 'core.admin'],
         // com_fields: core routes every one of its six field contexts through the Web
         // Services API, so these never touch the database and Joomla's own ACL governs them.
         'list_field_groups' => ['kind' => self::API, 'component' => null, 'action' => null],

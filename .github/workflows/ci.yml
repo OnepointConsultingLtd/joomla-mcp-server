@@ -52,6 +52,9 @@ jobs:
       - name: JavaScript syntax check
         run: node --check site/mcp-http-bridge.js
 
+      - name: Bridge tests
+        run: node --test tests/bridge/*.test.js
+
       - name: Build release package
         run: ./build.sh
 

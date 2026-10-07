@@ -17,6 +17,19 @@ class ToolRegistry
     /** Repeated verbatim by every com_fields tool schema; the six contexts core Joomla declares. */
     private const FIELD_CONTEXT_DESCRIPTION = 'Joomla custom field context. One of: com_content.article, com_content.categories, com_contact.contact, com_contact.mail, com_contact.categories, com_users.user';
 
+    /**
+     * Tool parameters mirrored into Mcp-Param-{name} headers (x-mcp-header): the
+     * identifier keys the audit trail records as a call's target, so gateways can
+     * route or police on the same value without parsing bodies. Only top-level
+     * integers qualify; the spec forbids number, nested and composed properties.
+     */
+    private const PARAM_HEADERS = [
+        'id' => 'Id',
+        'version_id' => 'Version-Id',
+        'extension_id' => 'Extension-Id',
+        'catid' => 'Catid',
+    ];
+
     private array $tools = [];
     private array $executors = [];
 
@@ -1889,6 +1902,22 @@ class ToolRegistry
         ]);
 
         $this->register([
+            'name' => 'get_system_information',
+            'description' => 'Get the essentials of Joomla\'s System Information page for diagnosing the site: Joomla, PHP, database and web server versions (info), PHP limits and required extensions such as memory_limit, upload_max_filesize, gd and zip (php_settings), and whether each core directory, the cache, log and tmp folders are writable (directories). Private values are redacted as "xxxxxx" by Joomla\'s own privacy filter, the one it applies to its downloadable report. Global configuration, phpinfo and the extension list are not included; use list_extensions for installed extensions.',
+            'inputSchema' => [
+                'type' => 'object',
+                // An object, not [], so tools/list serialises it as {}.
+                'properties' => new \stdClass(),
+            ],
+            'annotations' => [
+                'title' => 'Get System Information',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => false,
+            ],
+        ]);
+
+        $this->register([
             'name' => 'list_field_groups',
             'description' => 'List custom field groups (the tabs that custom fields are organised into) for a Joomla field context. Call this before create_field or update_field to discover valid group_id values.',
             'inputSchema' => [
@@ -2259,6 +2288,21 @@ class ToolRegistry
 
     public function register(array $tool): void
     {
+        // Display precedence is title, then annotations.title, then name; clients
+        // from 2025-06-18 on read the top-level field first.
+        if (!isset($tool['title']) && is_string($tool['annotations']['title'] ?? null)) {
+            $tool['title'] = $tool['annotations']['title'];
+        }
+
+        $properties = $tool['inputSchema']['properties'] ?? null;
+        if (is_array($properties)) {
+            foreach (self::PARAM_HEADERS as $property => $header) {
+                if (is_array($properties[$property] ?? null) && ($properties[$property]['type'] ?? null) === 'integer') {
+                    $tool['inputSchema']['properties'][$property]['x-mcp-header'] = $header;
+                }
+            }
+        }
+
         $this->tools[$tool['name']] = $tool;
     }
 
@@ -2284,6 +2328,21 @@ class ToolRegistry
     public function get(string $name): ?array
     {
         return $this->tools[$name] ?? null;
+    }
+
+    /**
+     * @return array<string, string>  property name => Mcp-Param header name
+     */
+    public function paramHeaders(string $name): array
+    {
+        $headers = [];
+        foreach ((array) ($this->tools[$name]['inputSchema']['properties'] ?? []) as $property => $schema) {
+            if (is_array($schema) && is_string($schema['x-mcp-header'] ?? null)) {
+                $headers[(string) $property] = $schema['x-mcp-header'];
+            }
+        }
+
+        return $headers;
     }
 
     public function getAll(): array

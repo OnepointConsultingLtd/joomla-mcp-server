@@ -101,6 +101,16 @@ $auditUserLabel = static function (array $user): string {
         : Text::sprintf('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_DELETED', (int) $user['user_id']);
 };
 
+// NULL is not an error: 2024-11-05 and 2025-03-26 clients send no version
+// after initialize, and rows written before 1.10.0 never recorded one.
+$protocolCell = static function (?string $version): string {
+    if ($version === null || $version === '') {
+        return '<span class="text-muted" title="' . htmlspecialchars(Text::_('COM_MCPSERVER_DASHBOARD_PROTOCOL_UNKNOWN_DESC'), ENT_QUOTES, 'UTF-8') . '">&mdash;</span>';
+    }
+
+    return '<code>' . htmlspecialchars($version, ENT_QUOTES, 'UTF-8') . '</code>';
+};
+
 $toolOptionTag = static function (string $name, ?string $selected): string {
     return '<option value="' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '"'
         . ($name === $selected ? ' selected' : '') . '>'
@@ -355,6 +365,7 @@ $cards = [
                             <tr>
                                 <th class="ps-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TIME'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_METHOD'); ?></th>
+                                <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_PROTOCOL'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TOOL'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_STATUS'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_COL_USER_NAME'); ?></th>
@@ -368,6 +379,7 @@ $cards = [
                                 <tr>
                                     <td class="ps-3 text-nowrap"><?php echo htmlspecialchars((string) ($row['created'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><code><?php echo htmlspecialchars((string) ($row['method'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></code></td>
+                                    <td class="text-nowrap"><?php echo $protocolCell($row['protocol_version'] ?? null); ?></td>
                                     <td><?php echo htmlspecialchars((string) ($row['tool_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><span class="badge <?php echo $statusBadge((string) ($row['status'] ?? '')); ?>"><?php echo htmlspecialchars((string) ($row['status'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></td>
                                     <td>
@@ -394,6 +406,7 @@ $cards = [
                                 <th class="ps-3"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TIME'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_CONTEXT'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_METHOD'); ?></th>
+                                <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_PROTOCOL'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_TOOL'); ?></th>
                                 <th><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_STATUS'); ?></th>
                                 <th class="text-end"><?php echo Text::_('COM_MCPSERVER_DASHBOARD_COL_HTTP'); ?></th>
@@ -407,6 +420,7 @@ $cards = [
                                 <td class="ps-3 text-nowrap"><?php echo htmlspecialchars(HTMLHelper::_('date', $row->created, 'Y-m-d H:i:s')); ?></td>
                                 <td><?php echo htmlspecialchars((string) $row->context); ?></td>
                                 <td><code><?php echo htmlspecialchars((string) $row->method); ?></code></td>
+                                <td class="text-nowrap"><?php echo $protocolCell($row->protocol_version ?? null); ?></td>
                                 <td><?php echo $row->tool_name !== '' ? '<code>' . htmlspecialchars((string) $row->tool_name) . '</code>' : '<span class="text-muted">&mdash;</span>'; ?></td>
                                 <td><span class="badge <?php echo $statusBadge((string) $row->status); ?>"><?php echo htmlspecialchars((string) $row->status); ?></span></td>
                                 <td class="text-end"><?php echo (int) $row->http_status; ?></td>

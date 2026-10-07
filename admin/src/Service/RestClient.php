@@ -196,14 +196,20 @@ class RestClient
     {
         $kind = str_starts_with(ltrim($body), '<') ? 'HTML' : 'a non-JSON response';
 
+        // This message reaches the MCP client, so it names the API path but not
+        // the Base URL, which can be an internal host; the log keeps the full URL.
+        $this->logger->error('Joomla Web Services API returned a non-JSON response', [
+            'url' => $this->baseUrl . '/' . ltrim($path, '/'),
+            'status' => $status,
+        ]);
+
         return new \RuntimeException(sprintf(
-            'The Joomla Web Services API at %s/%s returned %s instead of JSON (HTTP %d). '
+            'The Joomla Web Services API returned %s instead of JSON (HTTP %d) for %s. '
             . 'The request did not reach Joomla\'s API application — check the web server configuration: '
             . 'nginx needs a "location /api" block routing to /api/index.php; Apache needs .htaccess with mod_rewrite.',
-            $this->baseUrl,
-            ltrim($path, '/'),
             $kind,
-            $status
+            $status,
+            ltrim($path, '/')
         ), 0, $previous);
     }
 

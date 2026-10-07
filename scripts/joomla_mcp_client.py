@@ -1,7 +1,14 @@
-"""HTTP JSON-RPC client for the Joomla MCP Server component."""
+"""HTTP JSON-RPC client for the Joomla MCP Server component.
+
+Speaks the stateless 2026-07-28 revision by default: every request carries its
+protocol version and client capabilities in ``params._meta``, mirrored into the
+headers Streamable HTTP requires. Pass ``protocol_version=None`` for the legacy,
+initialize-based behaviour.
+"""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import ssl
@@ -12,34 +19,115 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+PROTOCOL_VERSION = "2026-07-28"
+LEGACY_PROTOCOL_VERSION = "2025-11-25"
+CLIENT_INFO = {"name": "joomla-mcp-eval", "version": "1.0.0"}
+
+META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
+META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
+META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+
+# Methods whose params.name / params.uri is mirrored into the Mcp-Name header.
+_NAME_SOURCES = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}
+
 
 class JoomlaMcpError(RuntimeError):
     pass
 
 
+def encode_header_value(value: str) -> str:
+    """Base64-sentinel encode a value that is not plain visible ASCII."""
+    plain = (
+        all(0x20 <= ord(char) <= 0x7E for char in value)
+        and value == value.strip()
+        and not (value.startswith("=?base64?") and value.endswith("?="))
+    )
+    if plain:
+        return value
+    return "=?base64?" + base64.b64encode(value.encode("utf-8")).decode("ascii") + "?="
+
+
+def parse_sse_messages(body: str) -> list[dict[str, Any]]:
+    """The JSON-RPC messages of a Server-Sent Events body, in order."""
+    messages = []
+    for event in body.replace("\r\n", "\n").split("\n\n"):
+        data = "\n".join(line[5:].removeprefix(" ") for line in event.split("\n") if line.startswith("data:"))
+        if data.strip():
+            messages.append(json.loads(data))
+    return messages
+
+
 class JoomlaHttpClient:
     """Call the Joomla MCP JSON-RPC endpoint over HTTP."""
 
-    def __init__(self, endpoint: str, bearer_token: str = "", timeout: float = 30.0):
+    def __init__(
+        self,
+        endpoint: str,
+        bearer_token: str = "",
+        timeout: float = 30.0,
+        protocol_version: str | None = PROTOCOL_VERSION,
+    ):
         self.endpoint = endpoint
         self.bearer_token = bearer_token
         self.timeout = timeout
+        self.protocol_version = protocol_version
         self._request_id = 0
+        self._param_headers: dict[str, dict[str, str]] = {}
+        self._param_headers_loaded = False
 
     def _next_id(self) -> int:
         self._request_id += 1
         return self._request_id
 
-    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
-        payload = {
-            "jsonrpc": "2.0",
-            "id": self._next_id(),
-            "method": method,
-            "params": params or {},
+    def _message(self, method: str, params: dict[str, Any] | None, request_id: Any) -> dict[str, Any]:
+        params = dict(params or {})
+        # initialize is the legacy handshake and never carries per-request metadata.
+        if self.protocol_version and method != "initialize":
+            meta = dict(params.get("_meta") or {})
+            meta.setdefault(META_PROTOCOL_VERSION, self.protocol_version)
+            meta.setdefault(META_CLIENT_CAPABILITIES, {})
+            meta.setdefault(META_CLIENT_INFO, CLIENT_INFO)
+            params["_meta"] = meta
+        return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+
+    def _headers(self, message: dict[str, Any]) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "Mcp-Method": message["method"],
         }
-        headers = {"Content-Type": "application/json"}
         if self.bearer_token:
             headers["Authorization"] = f"Bearer {self.bearer_token}"
+        params = message["params"]
+        version = (params.get("_meta") or {}).get(META_PROTOCOL_VERSION)
+        if version:
+            headers["MCP-Protocol-Version"] = version
+        name_field = _NAME_SOURCES.get(message["method"])
+        if name_field and isinstance(params.get(name_field), str):
+            headers["Mcp-Name"] = encode_header_value(params[name_field])
+        if message["method"] == "tools/call":
+            arguments = params.get("arguments") or {}
+            for prop, name in self._param_headers.get(params.get("name", ""), {}).items():
+                value = arguments.get(prop)
+                if value is not None:
+                    text = str(value).lower() if isinstance(value, bool) else str(value)
+                    headers[f"Mcp-Param-{name}"] = encode_header_value(text)
+        return headers
+
+    def _remember_param_headers(self, tools: list[dict[str, Any]]) -> None:
+        """Cache each tool's x-mcp-header annotations (argument -> header name)."""
+        for tool in tools:
+            properties = (tool.get("inputSchema") or {}).get("properties") or {}
+            self._param_headers[tool.get("name", "")] = {
+                prop: schema["x-mcp-header"]
+                for prop, schema in properties.items()
+                if isinstance(schema, dict) and isinstance(schema.get("x-mcp-header"), str)
+            }
+        self._param_headers_loaded = True
+
+    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        payload = self._message(method, params, self._next_id())
+        headers = self._headers(payload)
 
         request = Request(
             self.endpoint,
@@ -54,6 +142,7 @@ class JoomlaHttpClient:
                 context = ssl._create_unverified_context()
             with urlopen(request, timeout=self.timeout, context=context) as response:
                 body = response.read().decode("utf-8")
+                content_type = response.headers.get("Content-Type", "")
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise JoomlaMcpError(f"HTTP {exc.code}: {detail[:500]}") from exc
@@ -63,7 +152,15 @@ class JoomlaHttpClient:
         if not body.strip():
             return None
 
-        data = json.loads(body)
+        if content_type.startswith("text/event-stream"):
+            # The response is the stream's message carrying our request id;
+            # anything before it is a request-scoped notification.
+            responses = [m for m in parse_sse_messages(body) if m.get("id") == payload["id"]]
+            if not responses:
+                raise JoomlaMcpError(f"No response for {method} in the event stream")
+            data = responses[-1]
+        else:
+            data = json.loads(body)
         if "error" in data:
             error = data["error"]
             message = error.get("message", "Unknown JSON-RPC error")
@@ -71,8 +168,20 @@ class JoomlaHttpClient:
 
         return data.get("result")
 
+    def discover(self) -> dict[str, Any]:
+        """server/discover: the server's supported versions, capabilities and identity."""
+        return self.call("server/discover")
+
     def initialize(self) -> dict[str, Any]:
-        return self.call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        """Send the legacy handshake.
+
+        The server keeps no handshake state, so this does not switch the client
+        to legacy semantics: construct it with ``protocol_version=None`` for that.
+        """
+        return self.call(
+            "initialize",
+            {"protocolVersion": LEGACY_PROTOCOL_VERSION, "capabilities": {}, "clientInfo": CLIENT_INFO},
+        )
 
     def _list_paginated(self, method: str, items_key: str) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -98,7 +207,9 @@ class JoomlaHttpClient:
         return items
 
     def list_tools(self) -> list[dict[str, Any]]:
-        return self._list_paginated("tools/list", "tools")
+        tools = self._list_paginated("tools/list", "tools")
+        self._remember_param_headers(tools)
+        return tools
 
     def list_resources(self) -> list[dict[str, Any]]:
         return self._list_paginated("resources/list", "resources")
@@ -116,6 +227,10 @@ class JoomlaHttpClient:
         return self.call("prompts/get", {"name": name, "arguments": arguments or {}})
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        # Modern servers reject a call missing its Mcp-Param-* headers, which
+        # come from the tool schemas.
+        if self.protocol_version and not self._param_headers_loaded:
+            self.list_tools()
         result = self.call("tools/call", {"name": name, "arguments": arguments or {}})
         if not isinstance(result, dict):
             return result
@@ -143,8 +258,15 @@ class JoomlaHttpClient:
 class JoomlaBridgeClient(JoomlaHttpClient):
     """Speak JSON-RPC over the Node stdio bridge process."""
 
-    def __init__(self, bridge_script: str, endpoint: str, bearer_token: str = "", timeout: float = 30.0):
-        super().__init__(endpoint, bearer_token, timeout)
+    def __init__(
+        self,
+        bridge_script: str,
+        endpoint: str,
+        bearer_token: str = "",
+        timeout: float = 30.0,
+        protocol_version: str | None = PROTOCOL_VERSION,
+    ):
+        super().__init__(endpoint, bearer_token, timeout, protocol_version)
         self.bridge_script = bridge_script
         self._process: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
@@ -191,12 +313,8 @@ class JoomlaBridgeClient(JoomlaHttpClient):
             raise JoomlaMcpError("Bridge process is not running")
 
         request_id = str(uuid.uuid4())
-        payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params or {},
-        }
+        # No headers on stdio: the bridge derives them from the body.
+        payload = self._message(method, params, request_id)
 
         with self._lock:
             self._pending[request_id] = None

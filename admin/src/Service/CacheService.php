@@ -28,6 +28,15 @@ class CacheService
 
     private const SENTINEL = "\x00__CACHE_MISS__\x00";
 
+    /**
+     * How long a read may be served from this cache, in seconds — and therefore
+     * how long a client may treat it as fresh.
+     */
+    public function getDefaultTtl(): int
+    {
+        return max(0, $this->defaultTtlSeconds);
+    }
+
     public function remember(string $key, callable $callback, ?int $ttl = null)
     {
         $cached = $this->cache->get($key, self::SENTINEL);

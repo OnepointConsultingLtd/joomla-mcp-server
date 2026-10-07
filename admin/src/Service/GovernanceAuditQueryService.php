@@ -68,6 +68,7 @@ final class GovernanceAuditQueryService
         'user_id',
         'credential_selector',
         'target',
+        'protocol_version',
     ];
 
     /**

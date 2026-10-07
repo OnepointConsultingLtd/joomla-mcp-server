@@ -28,7 +28,7 @@ class JoomlaMcpConnection:
         else:
             client = JoomlaHttpClient(self.endpoint, self.bearer_token)
 
-        client.initialize()
+        client.discover()
         self._client = client
         self._tools = anthropic_tools(client.list_tools())
         return self

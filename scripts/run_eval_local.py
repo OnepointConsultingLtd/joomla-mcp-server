@@ -35,7 +35,7 @@ def main() -> int:
 
     client = JoomlaHttpClient(args.url, args.token)
     try:
-        client.initialize()
+        client.discover()
         actual_pairs = build_qa_pairs(client, for_verification=True)
     except JoomlaMcpError as exc:
         print(f"Error: {exc}", file=sys.stderr)

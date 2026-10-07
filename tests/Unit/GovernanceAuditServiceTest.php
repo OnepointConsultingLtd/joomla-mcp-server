@@ -233,6 +233,42 @@ final class GovernanceAuditServiceTest extends TestCase
         $this->assertSame('NULL', $byColumn['credential_selector']);
     }
 
+    public function testRecordStoresProtocolVersionAndNullWhenUndeclared(): void
+    {
+        $byColumn = function (FakeAuditDatabase $db): array {
+            $columns = array_map(static fn (string $c): string => trim($c, '`'), $db->lastQuery->insertColumns);
+
+            return array_combine($columns, explode(',', $db->lastQuery->insertValues));
+        };
+
+        $db = new FakeAuditDatabase();
+        (new GovernanceAuditService($db, $this->clock()))->record(
+            method: 'tools/list',
+            toolName: null,
+            status: 'ok',
+            errorCode: null,
+            httpStatus: 200,
+            durationMs: 3,
+            clientIp: '203.0.113.9',
+            context: 'site',
+            protocolVersion: '2026-07-28',
+        );
+        $this->assertSame("'2026-07-28'", $byColumn($db)['protocol_version']);
+
+        $db = new FakeAuditDatabase();
+        (new GovernanceAuditService($db, $this->clock()))->record(
+            method: 'tools/list',
+            toolName: null,
+            status: 'ok',
+            errorCode: null,
+            httpStatus: 200,
+            durationMs: 3,
+            clientIp: '203.0.113.9',
+            context: 'site',
+        );
+        $this->assertSame('NULL', $byColumn($db)['protocol_version']);
+    }
+
     public function testRecordUsesNullAttributionForAuthFailure(): void
     {
         $db = new FakeAuditDatabase();

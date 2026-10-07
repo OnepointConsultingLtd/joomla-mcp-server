@@ -17,6 +17,7 @@ use Joomla\CMS\Event\Cache\AfterPurgeEvent;
 use Joomla\CMS\Factory;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
+use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
 use Joomla\Component\Mcpserver\Administrator\Service\PromptRegistry;
 use Joomla\Component\Mcpserver\Administrator\Service\RestClient;
@@ -24,6 +25,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\RpcService;
 use Joomla\Component\Mcpserver\Administrator\Service\SchemaValidator;
 use Joomla\Component\Mcpserver\Administrator\Service\SimpleArrayCache;
 use Joomla\Component\Mcpserver\Administrator\Service\ToolRegistry;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -74,7 +76,7 @@ class RpcServiceTest extends TestCase
         $registered = array_column($registry->getAll(), 'name');
 
         $this->assertSame($registered, $listed);
-        $this->assertCount(88, $listed);
+        $this->assertCount(89, $listed);
     }
 
     public function testSiteHealthReturnsOkAndJoomlaVersion(): void
@@ -454,6 +456,93 @@ class RpcServiceTest extends TestCase
         $service->handle(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []]);
 
         $this->assertFalse($service->wasLastCallFailed());
+    }
+
+    public function testUnknownToolIsInvalidParams(): void
+    {
+        $response = $this->callTool($this->makeService(), 'no_such_tool', []);
+
+        $this->assertSame(JsonRpc::INVALID_PARAMS, $response['error']['code']);
+        $this->assertSame('Unknown tool: no_such_tool', $response['error']['message']);
+    }
+
+    public function testInvalidArgumentsAreAToolExecutionErrorNotAProtocolError(): void
+    {
+        // SEP-1303: the model must see the validation message to correct its
+        // arguments, so it arrives as an isError result — and must still be
+        // audited as a failure, not 'ok'.
+        $rest = $this->createRestMock();
+        $rest->expects($this->never())->method('get');
+        $service = $this->makeService(null, $rest);
+
+        $response = $this->callTool($service, 'get_article_by_id', []);
+
+        $this->assertArrayNotHasKey('error', $response);
+        $this->assertTrue($response['result']['isError']);
+        $this->assertStringStartsWith('Invalid parameters: ', $response['result']['content'][0]['text']);
+        $this->assertTrue($service->wasLastCallFailed());
+        $this->assertFalse($service->wasLastCallBlocked());
+    }
+
+    public function testNonStringToolNameIsInvalidParams(): void
+    {
+        $response = $this->makeService()->handle([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => ['name' => ['search_articles'], 'arguments' => []],
+        ]);
+
+        $this->assertSame(JsonRpc::INVALID_PARAMS, $response['error']['code']);
+    }
+
+    #[DataProvider('nonObjectArguments')]
+    public function testNonObjectArgumentsAreInvalidParams(mixed $arguments): void
+    {
+        $response = $this->makeService()->handle([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => ['name' => 'search_articles', 'arguments' => $arguments],
+        ]);
+
+        $this->assertSame(JsonRpc::INVALID_PARAMS, $response['error']['code']);
+    }
+
+    public static function nonObjectArguments(): array
+    {
+        return [
+            'a string' => ['hello'],
+            'a list' => [['hello']],
+        ];
+    }
+
+    #[DataProvider('resultsThatAreNotJsonObjects')]
+    public function testLegacyStructuredContentIsOmittedWhenTheResultIsNotAnObject(array $result): void
+    {
+        // Before 2026-07-28 structuredContent must be a JSON object; a PHP list,
+        // or the [] RestClient returns for an empty body, encodes as an array.
+        $registry = new ToolRegistry();
+        $registry->register([
+            'name' => 'list_things',
+            'description' => 'Test tool',
+            'inputSchema' => ['type' => 'object'],
+            'annotations' => ['readOnlyHint' => true],
+        ]);
+        $registry->setExecutor('list_things', static fn (): array => $result);
+
+        $response = $this->callTool($this->makeService($registry), 'list_things', []);
+
+        $this->assertArrayNotHasKey('structuredContent', $response['result']);
+        $this->assertSame(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), $response['result']['content'][0]['text']);
+    }
+
+    public static function resultsThatAreNotJsonObjects(): array
+    {
+        return [
+            'a list' => [['a', 'b']],
+            'empty' => [[]],
+        ];
     }
 
     public function testGovernedPrincipalWithoutAuthorizerIsRejectedAtConstruction(): void

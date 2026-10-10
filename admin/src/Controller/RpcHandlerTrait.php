@@ -471,7 +471,7 @@ trait RpcHandlerTrait
         try {
             return [$rpcService->handle($request), false];
         } catch (\Throwable $e) {
-            $this->resolveService(LoggerInterface::class)?->error('RPC dispatch failed', [
+            $this->resolveService(MonologFactory::SERVICE_KEY)?->error('RPC dispatch failed', [
                 'method' => $method,
                 'error'  => $e->getMessage(),
             ]);
@@ -851,7 +851,7 @@ trait RpcHandlerTrait
                 // a persistent failure here (e.g. the 1.8.0 attribution columns
                 // never applied) would otherwise leave the audit trail silently
                 // empty while the server looks perfectly healthy.
-                $this->resolveService(LoggerInterface::class)?->critical(
+                $this->resolveService(MonologFactory::SERVICE_KEY)?->critical(
                     'Governed audit write failed — this request is NOT in the audit trail',
                     [
                         'error'      => $e->getMessage(),
@@ -919,7 +919,7 @@ trait RpcHandlerTrait
     private function createRpcServiceForPrincipal(Registry $params, AuthenticatedPrincipal $principal): RpcService
     {
         $serverName = (string) $params->get('server_name', 'joomla-mcp-server');
-        $logger = $this->resolveService(LoggerInterface::class)
+        $logger = $this->resolveService(MonologFactory::SERVICE_KEY)
             ?? MonologFactory::createComponentLogger('mcpserver', $serverName);
         $rest = (new RestClientFactory($params, $logger))->createForPrincipal($principal);
 

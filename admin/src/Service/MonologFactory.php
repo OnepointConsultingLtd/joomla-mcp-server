@@ -21,6 +21,14 @@ use Monolog\LogRecord;
 
 class MonologFactory
 {
+    /**
+     * Container key for the component logger. Never Psr\Log\LoggerInterface:
+     * Joomla registers that as a protected core service, and on Joomla 4
+     * (joomla/di 2.0) a component's child container may not overwrite a key
+     * protected in its parent, so registering it there broke every request.
+     */
+    public const SERVICE_KEY = 'com_mcpserver.logger';
+
     public static function createComponentLogger(string $channel = 'mcpserver', string $serverName = ''): Logger
     {
         $logger = new Logger($channel);

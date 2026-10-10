@@ -118,7 +118,15 @@ namespace Joomla\CMS\Component {
     }
 }
 
+namespace Joomla\DI\Exception {
+    class ProtectedKeyException extends \OutOfBoundsException
+    {
+    }
+}
+
 namespace Joomla\DI {
+    use Joomla\DI\Exception\ProtectedKeyException;
+
     interface ServiceProviderInterface
     {
         public function register(Container $container): void;
@@ -135,8 +143,23 @@ namespace Joomla\DI {
         /** @var array<string, bool> */
         private array $shared = [];
 
-        public function set(string $key, mixed $value, bool $shared = false): self
+        /** @var array<string, bool> */
+        private array $protected = [];
+
+        /**
+         * Mirrors joomla/di 2.0.x (Joomla 4): a protected key cannot be
+         * overwritten. Joomla 4 also refuses it when the key was protected in
+         * a parent container, which is how a component's child container sees
+         * the core services, so a test registers the core key here directly.
+         */
+        public function set(string $key, mixed $value, bool $shared = false, bool $protected = false): self
         {
+            if (!empty($this->protected[$key])) {
+                throw new ProtectedKeyException(sprintf("Key %s is protected and can't be overwritten.", $key));
+            }
+
+            $this->protected[$key] = $protected;
+
             if ($value instanceof \Closure) {
                 $this->factories[$key] = $value;
                 $this->shared[$key] = $shared;
@@ -148,9 +171,14 @@ namespace Joomla\DI {
             return $this;
         }
 
-        public function share(string $key, callable $factory): self
+        public function share(string $key, callable $factory, bool $protected = false): self
         {
-            return $this->set($key, \Closure::fromCallable($factory), true);
+            return $this->set($key, \Closure::fromCallable($factory), true, $protected);
+        }
+
+        public function has(string $key): bool
+        {
+            return array_key_exists($key, $this->instances) || isset($this->factories[$key]);
         }
 
         public function get(string $key): mixed

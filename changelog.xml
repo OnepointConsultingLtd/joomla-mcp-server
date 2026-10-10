@@ -3,6 +3,14 @@
     <changelog>
         <element>com_mcpserver</element>
         <type>component</type>
+        <version>1.10.1</version>
+        <fix>
+            <item>Fixed every request failing on Joomla 4 with "Key Psr\Log\LoggerInterface is protected and can't be overwritten" (#39).</item>
+        </fix>
+    </changelog>
+    <changelog>
+        <element>com_mcpserver</element>
+        <type>component</type>
         <version>1.10.0</version>
         <addition>
             <item>Added argument completion (completion/complete) for prompt arguments and the article resource template: published category titles for draft-article's category, article IDs for article_id and joomla://article/{id} (digits match an ID by prefix; words search titles), and published content-language codes for target_language.</item>

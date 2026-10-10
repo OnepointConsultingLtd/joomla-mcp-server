@@ -1,0 +1,4 @@
+-- 1.10.1 only changes the container key the component logger is registered under,
+-- so there is no schema change.
+-- The file exists because Joomla applies update SQL by version filename: without it
+-- the 1.10.1 step is missing from the upgrade sequence.

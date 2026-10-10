@@ -2,6 +2,10 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## 1.10.1 - 2026-10-11
+
+- Fixed every request failing on Joomla 4 with "Key Psr\Log\LoggerInterface is protected and can't be overwritten" (#39). The component registered its logger under `Psr\Log\LoggerInterface`, which Joomla registers as a protected core service, and Joomla 4's container refuses to let a component's child container overwrite a key protected in its parent. The logger now has its own container key.
+
 ## 1.10.0 - 2026-10-01
 
 - Added argument completion (`completion/complete`) for prompt arguments and the article resource template: published category titles for `draft-article`'s `category`, article IDs for `article_id` and `joomla://article/{id}` (digits match an ID by prefix; words search titles), and published content-language codes for `target_language`. Suggestions are fetched with the caller's own API token, so Joomla's ACL decides what they can reveal, and are cached per user. Title searches treat `%`, `_` and Joomla's `author:`-style operators as plain text, and suggestions differing only in case are offered once. The `completions` capability is advertised whenever Enable Prompts or Enable Resources is on.

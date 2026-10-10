@@ -63,7 +63,6 @@ use Joomla\DI\Container;
 use Joomla\DI\ServiceProviderInterface;
 use Joomla\Input\Input;
 use Joomla\Registry\Registry;
-use Psr\Log\LoggerInterface;
 
 return new class implements ServiceProviderInterface {
 
@@ -146,7 +145,7 @@ return new class implements ServiceProviderInterface {
                 $container->get(CredentialCipher::class),
                 // So a failed last_used stamp is visible rather than silent; it
                 // no longer denies the request, which would hide it entirely.
-                $container->get(LoggerInterface::class)
+                $container->get(MonologFactory::SERVICE_KEY)
             );
         });
 
@@ -205,8 +204,9 @@ return new class implements ServiceProviderInterface {
             );
         });
 
-        // Logger
-        $container->share(LoggerInterface::class, function () {
+        // Component logger, under its own key rather than the protected core
+        // PSR-3 key (see MonologFactory::SERVICE_KEY).
+        $container->share(MonologFactory::SERVICE_KEY, function () {
             $params = ComponentHelper::getParams('com_mcpserver');
             $serverName = (string) $params->get('server_name', 'joomla-mcp-server');
             return MonologFactory::createComponentLogger('mcpserver', $serverName);
@@ -297,7 +297,7 @@ return new class implements ServiceProviderInterface {
         $container->share(RestClientFactory::class, function (Container $container) {
             return new RestClientFactory(
                 ComponentHelper::getParams('com_mcpserver'),
-                $container->get(LoggerInterface::class)
+                $container->get(MonologFactory::SERVICE_KEY)
             );
         });
 
@@ -322,7 +322,7 @@ return new class implements ServiceProviderInterface {
                 $container->get(RestClient::class),
                 $container->get(CacheService::class),
                 $container->get(PolicyService::class),
-                $container->get(LoggerInterface::class),
+                $container->get(MonologFactory::SERVICE_KEY),
                 $container->get(ToolRegistry::class),
                 $container->get(SchemaValidator::class),
                 $container->get(PromptRegistry::class),

@@ -39,14 +39,14 @@ class ToolRegistryTest extends TestCase
         $this->assertSame('Own title', $registry->get('custom')['title']);
     }
 
-    public function testTargetIdsAreAnnotatedOnFortyEightTools(): void
+    public function testTargetIdsAreAnnotatedOnFortyNineTools(): void
     {
         $annotated = array_filter(
             (new ToolRegistry())->getAll(),
             static fn (array $tool): bool => (new ToolRegistry())->paramHeaders($tool['name']) !== []
         );
 
-        $this->assertCount(48, $annotated);
+        $this->assertCount(49, $annotated);
     }
 
     public function testOnlyTopLevelIntegersAreAnnotatedWithValidUniqueNames(): void

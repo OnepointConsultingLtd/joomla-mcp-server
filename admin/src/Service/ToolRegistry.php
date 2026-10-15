@@ -1556,6 +1556,47 @@ class ToolRegistry
         ]);
 
         $this->register([
+            'name' => 'create_contact',
+            'description' => 'Create a new Joomla contact (com_contact). Contacts live in their own category tree, separate from article categories, so catid must be a contact category ID (Components > Contacts > Categories) — list_categories returns article categories only. Requires the Web Services - Contact plugin to be enabled.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'name' => ['type' => 'string', 'description' => 'Contact name'],
+                    'catid' => ['type' => 'integer', 'description' => 'Contact category ID'],
+                    'alias' => ['type' => 'string', 'description' => 'URL alias'],
+                    'con_position' => ['type' => 'string', 'description' => 'Position or job title'],
+                    'email_to' => ['type' => 'string', 'description' => 'Email address the contact form sends to'],
+                    'telephone' => ['type' => 'string'],
+                    'mobile' => ['type' => 'string'],
+                    'fax' => ['type' => 'string'],
+                    'webpage' => ['type' => 'string', 'description' => 'Website URL'],
+                    'address' => ['type' => 'string', 'description' => 'Street address'],
+                    'suburb' => ['type' => 'string', 'description' => 'City or suburb'],
+                    'state' => ['type' => 'string', 'description' => 'State, county or province'],
+                    'postcode' => ['type' => 'string'],
+                    'country' => ['type' => 'string'],
+                    'misc' => ['type' => 'string', 'description' => 'Miscellaneous information (HTML)'],
+                    'image' => ['type' => 'string', 'description' => 'Image path relative to the site root, e.g. images/staff/jane.jpg'],
+                    'user_id' => ['type' => 'integer', 'description' => 'ID of a Joomla user to link this contact to'],
+                    'published' => ['type' => 'integer', 'enum' => [0, 1], 'default' => 1],
+                    'featured' => ['type' => 'integer', 'enum' => [0, 1], 'default' => 0],
+                    'access' => ['type' => 'integer', 'default' => 1, 'description' => 'Access level ID'],
+                    'language' => ['type' => 'string', 'default' => '*', 'description' => 'Language code or "*" for all'],
+                    'metadesc' => ['type' => 'string', 'description' => 'Meta description'],
+                    'note' => ['type' => 'string', 'description' => 'Admin note'],
+                ],
+                'required' => ['name', 'catid'],
+            ],
+            'annotations' => [
+                'title' => 'Create Contact',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => false,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
             'name' => 'list_extensions',
             'description' => 'List extensions installed on the Joomla site (read-only view of `#__extensions`). Filter by type to find plugins, modules, components, templates, languages, libraries or packages. Use the returned extension_id with set_extension_state or uninstall_extension.',
             'inputSchema' => [

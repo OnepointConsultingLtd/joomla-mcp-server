@@ -20,7 +20,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 89 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 90 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -51,6 +51,12 @@ The component exposes 89 tools grouped by Joomla domain. List tools include a `p
 | `create_tag` | Create a new Joomla tag |
 | `update_tag` | Update an existing Joomla tag |
 | `delete_tag` | Delete a Joomla tag (trashes first, then deletes) |
+
+### Contacts
+
+| Tool | Description |
+|---|---|
+| `create_contact` | Create a Joomla contact in a contact category (requires the Web Services - Contact plugin) |
 
 ### Article versions
 

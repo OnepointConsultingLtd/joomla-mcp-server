@@ -76,7 +76,7 @@ class RpcServiceTest extends TestCase
         $registered = array_column($registry->getAll(), 'name');
 
         $this->assertSame($registered, $listed);
-        $this->assertCount(89, $listed);
+        $this->assertCount(90, $listed);
     }
 
     public function testSiteHealthReturnsOkAndJoomlaVersion(): void
@@ -150,6 +150,70 @@ class RpcServiceTest extends TestCase
         $this->assertArrayNotHasKey('articletext', $captured['body']);
         $this->assertArrayNotHasKey('text', $captured['body']);
         $this->assertArrayNotHasKey('content', $captured['body']);
+    }
+
+    public function testCreateContactPostsDefaultsAndOnlySuppliedOptionalFields(): void
+    {
+        $captured = [];
+        $rest = $this->createRestMock();
+        $rest->method('post')->willReturnCallback(
+            static function (string $path, array $jsonBody) use (&$captured): array {
+                $captured = ['path' => $path, 'body' => $jsonBody];
+
+                return ['data' => ['id' => 5]];
+            }
+        );
+
+        $service = $this->makeService(null, $rest);
+        $response = $this->callTool($service, 'create_contact', [
+            'name' => 'Jane Doe',
+            'catid' => 4,
+            'email_to' => 'jane@example.test',
+            'con_position' => 'Editor',
+            'user_id' => 42,
+        ]);
+
+        $this->assertSame(['data' => ['id' => 5]], $this->toolResult($response));
+        $this->assertSame('api/index.php/v1/contacts', $captured['path']);
+        $this->assertSame([
+            'name' => 'Jane Doe',
+            'catid' => 4,
+            'published' => 1,
+            'featured' => 0,
+            'access' => 1,
+            'language' => '*',
+            'con_position' => 'Editor',
+            'email_to' => 'jane@example.test',
+            'user_id' => 42,
+        ], $captured['body']);
+    }
+
+    public function testCreateContactRejectsMissingCatid(): void
+    {
+        $rest = $this->createRestMock();
+        $rest->expects($this->never())->method('post');
+
+        $service = $this->makeService(null, $rest);
+        $response = $this->callTool($service, 'create_contact', ['name' => 'Jane Doe']);
+
+        $this->assertTrue($response['result']['isError'] ?? false);
+        $this->assertStringContainsString('catid', $response['result']['content'][0]['text']);
+    }
+
+    public function testCreateContactNamesTheWebservicesPluginOn404(): void
+    {
+        $rest = $this->createRestMock();
+        $rest->method('post')->willThrowException(new \GuzzleHttp\Exception\RequestException(
+            'Not Found',
+            new \GuzzleHttp\Psr7\Request('POST', 'https://example.test'),
+            new \GuzzleHttp\Psr7\Response(404, [], '{"errors":[{"code":404}]}')
+        ));
+
+        $service = $this->makeService(null, $rest);
+        $response = $this->callTool($service, 'create_contact', ['name' => 'Jane Doe', 'catid' => 4]);
+
+        $this->assertTrue($response['result']['isError'] ?? false);
+        $this->assertStringContainsString('plg_webservices_contact', $response['result']['content'][0]['text']);
     }
 
     public function testSearchArticlesSendsFiltersAsJoomlaFilterQueryParams(): void

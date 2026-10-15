@@ -84,6 +84,7 @@ final class ToolAccessPolicy
         'create_tag' => ['kind' => self::API, 'component' => null, 'action' => null],
         'update_tag' => ['kind' => self::API, 'component' => null, 'action' => null],
         'delete_tag' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_contact' => ['kind' => self::API, 'component' => null, 'action' => null],
         'list_extensions' => ['kind' => self::DIRECT, 'component' => 'com_installer', 'action' => 'core.manage'],
         'set_extension_state' => ['kind' => self::DIRECT, 'component' => 'com_plugins', 'action' => 'core.edit.state', 'id' => 'extension_id', 'resolve' => 'plugin_extension'],
         // Site-wide core.admin, not the per-extension mapping set_extension_state uses:

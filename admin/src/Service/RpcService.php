@@ -2755,7 +2755,7 @@ class RpcService
             'content' => $content,
         ]);
         $this->cache->deleteByPrefix('media_');
-        return $result;
+        return $this->withoutEchoedMediaContent($result);
     }
 
     private function createMediaFolder(array $params): array
@@ -2795,6 +2795,20 @@ class RpcService
 
         $result = $this->rest->patch('api/index.php/v1/media/files/' . $this->mediaItemPath($path), $payload);
         $this->cache->deleteByPrefix('media_');
+        return $this->withoutEchoedMediaContent($result);
+    }
+
+    /**
+     * Joomla's media API answers a write by re-reading the item with the write's model state,
+     * where "content" holds the uploaded bytes and is read back as "include content" — so the
+     * whole file returns as base64. Passing that on makes the tool result as large as the file,
+     * which MCP clients truncate or reject; the agent then reports a failed upload and retries
+     * into "File exists" although the first call succeeded.
+     */
+    private function withoutEchoedMediaContent(array $result): array
+    {
+        unset($result['data']['attributes']['content']);
+
         return $result;
     }
 

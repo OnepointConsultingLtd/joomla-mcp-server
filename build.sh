@@ -87,6 +87,32 @@ python3 "$SCRIPT_DIR/scripts/add_vendor_license_headers.py" "$BUILD_DIR/admin/ve
 find "$BUILD_DIR" -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
 echo "Packaged PHP syntax check passed"
 
+# The rewrites can also change behaviour without breaking syntax (1.8.0-1.10.1 shipped
+# credentials in standard base64 that the server then refused), so exercise the
+# packaged base64url encoders directly
+php -r '
+define("_JEXEC", 1);
+require $argv[1] . "/McpCredential.php";
+require $argv[1] . "/CredentialCipher.php";
+use Joomla\Component\Mcpserver\Administrator\Service\{McpCredential, CredentialCipher};
+$cipher = new CredentialCipher("build-check", base64_encode(random_bytes(32)));
+for ($i = 0; $i < 200; $i++) {
+    $token = McpCredential::issue()["token"];
+    if (!preg_match("/^mcp_[A-Za-z0-9_-]{16}\\.[A-Za-z0-9_-]{43}$/D", $token)) {
+        fwrite(STDERR, "Packaged McpCredential issued a non-base64url token: $token\n");
+        exit(1);
+    }
+    $plaintext = random_bytes(48);
+    $encrypted = $cipher->encrypt($plaintext);
+    if (preg_match("/[^A-Za-z0-9_-]/", $encrypted["ciphertext"] . $encrypted["nonce"] . $encrypted["tag"])
+        || $cipher->decrypt($encrypted) !== $plaintext) {
+        fwrite(STDERR, "Packaged CredentialCipher failed its base64url round trip\n");
+        exit(1);
+    }
+}
+' "$BUILD_DIR/admin/src/Service"
+echo "Packaged credential encoding check passed"
+
 # Create the zip package
 rm -f "$SCRIPT_DIR/$PACKAGE"
 cd "$BUILD_DIR"

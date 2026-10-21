@@ -28,6 +28,26 @@ class McpCredentialTest extends TestCase
         $this->assertTrue(McpCredential::verify($parsed['secret'], $credential['verifier']));
     }
 
+    public function testIssuedTokensUseTheBase64UrlAlphabet(): void
+    {
+        for ($i = 0; $i < 50; $i++) {
+            $this->assertMatchesRegularExpression(
+                '/^mcp_[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/D',
+                McpCredential::issue()['token']
+            );
+        }
+    }
+
+    public function testAcceptsStandardBase64TokensIssuedByTheBroken1_10_1Build(): void
+    {
+        $selector = 'Ab+/Cd+eF/gh-_ij';
+        $secret = str_repeat('a+b/', 10) . 'c-_';
+
+        $parsed = McpCredential::parseBearer('Bearer mcp_' . $selector . '.' . $secret);
+
+        $this->assertSame(['selector' => $selector, 'secret' => $secret], $parsed);
+    }
+
     public function testMalformedAndWrongBearerCredentialsAreRejected(): void
     {
         $credential = McpCredential::issue();

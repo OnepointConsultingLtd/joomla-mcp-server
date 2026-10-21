@@ -84,7 +84,9 @@ final class CredentialCipher
 
     private static function decode(string $value): string
     {
-        if (!preg_match('/^[A-Za-z0-9_-]*$/', $value)) {
+        // '+' and '/' are accepted for values encrypted by the 1.8.0-1.10.1 packages, whose build
+        // step broke encode() into emitting standard base64; the translation below leaves them as is.
+        if (!preg_match('/^[A-Za-z0-9_+\/-]*$/', $value)) {
             throw new \RuntimeException('Malformed base64url encoding');
         }
         $value = strtr($value, '-_', '+/') . str_repeat('=', (4 - (strlen($value) % 4)) % 4);

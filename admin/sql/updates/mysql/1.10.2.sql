@@ -1,0 +1,4 @@
+-- 1.10.2 fixes the packaged credential encoding, adds create_contact and stops the
+-- media tools echoing uploads, so there is no schema change.
+-- The file exists because Joomla applies update SQL by version filename: without it
+-- the 1.10.2 step is missing from the upgrade sequence.

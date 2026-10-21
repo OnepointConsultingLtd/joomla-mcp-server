@@ -2,6 +2,13 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## 1.10.2 - 2026-10-21
+
+- Fixed every Governed Mode credential being refused with "Invalid or expired MCP credential" (`-32001`) (#41).
+- Corrected two bundled libraries that had been altered by the JED-prep build step.
+- Added `create_contact`, which creates a Joomla contact (`com_contact`).
+- `upload_media` and `update_media` no longer return the uploaded file. MCP clients truncated or rejected it, so the agent reported a failed upload and retried into "File exists" although the first call had succeeded.
+
 ## 1.10.1 - 2026-10-11
 
 - Fixed every request failing on Joomla 4 with "Key Psr\Log\LoggerInterface is protected and can't be overwritten" (#39). The component registered its logger under `Psr\Log\LoggerInterface`, which Joomla registers as a protected core service, and Joomla 4's container refuses to let a component's child container overwrite a key protected in its parent. The logger now has its own container key.

@@ -225,6 +225,7 @@ class RpcService
             'create_tag'                    => fn(array $p) => $this->createTag($p),
             'update_tag'                    => fn(array $p) => $this->updateTag($p),
             'delete_tag'                    => fn(array $p) => $this->deleteTag($p),
+            'create_contact'                => fn(array $p) => $this->createContact($p),
             'list_extensions'               => fn(array $p) => $this->listExtensions($p),
             'set_extension_state'           => fn(array $p) => $this->setExtensionState($p),
             'get_extension_params'          => fn(array $p) => $this->getExtensionParams($p),
@@ -2754,7 +2755,7 @@ class RpcService
             'content' => $content,
         ]);
         $this->cache->deleteByPrefix('media_');
-        return $result;
+        return $this->withoutEchoedMediaContent($result);
     }
 
     private function createMediaFolder(array $params): array
@@ -2794,6 +2795,20 @@ class RpcService
 
         $result = $this->rest->patch('api/index.php/v1/media/files/' . $this->mediaItemPath($path), $payload);
         $this->cache->deleteByPrefix('media_');
+        return $this->withoutEchoedMediaContent($result);
+    }
+
+    /**
+     * Joomla's media API answers a write by re-reading the item with the write's model state,
+     * where "content" holds the uploaded bytes and is read back as "include content" — so the
+     * whole file returns as base64. Passing that on makes the tool result as large as the file,
+     * which MCP clients truncate or reject; the agent then reports a failed upload and retries
+     * into "File exists" although the first call succeeded.
+     */
+    private function withoutEchoedMediaContent(array $result): array
+    {
+        unset($result['data']['attributes']['content']);
+
         return $result;
     }
 
@@ -2892,6 +2907,11 @@ class RpcService
     private const CONTENT_LANGUAGES_PATH = 'api/index.php/v1/languages';
     private const CATEGORIES_PATH = 'api/index.php/v1/content/categories';
     private const TAGS_PATH = 'api/index.php/v1/tags';
+    private const CONTACTS_PATH = 'api/index.php/v1/contacts';
+    private const CONTACT_OPTIONAL_FIELDS = [
+        'alias', 'con_position', 'email_to', 'telephone', 'mobile', 'fax', 'webpage', 'address',
+        'suburb', 'state', 'postcode', 'country', 'misc', 'image', 'metadesc', 'note',
+    ];
     private const ASSOC_CONTEXT_ARTICLE = 'com_content.item';
     private const ASSOC_CONTEXT_MENU_ITEM = 'com_menus.item';
     private const ARTICLE_VERSION_ITEM_ID_PREFIX = 'com_content.article.';
@@ -5114,6 +5134,51 @@ class RpcService
         return $result;
     }
 
+    private function createContact(array $params): array
+    {
+        $name = (string) ($params['name'] ?? '');
+        $catid = (int) ($params['catid'] ?? 0);
+        if ($name === '' || $catid <= 0) {
+            throw new \InvalidArgumentException('name and catid are required');
+        }
+
+        $payload = [
+            'name'      => $name,
+            'catid'     => $catid,
+            'published' => (int) ($params['published'] ?? 1),
+            'featured'  => (int) ($params['featured'] ?? 0),
+            'access'    => (int) ($params['access'] ?? 1),
+            'language'  => $params['language'] ?? '*',
+        ];
+
+        foreach (self::CONTACT_OPTIONAL_FIELDS as $key) {
+            if (isset($params[$key])) {
+                $payload[$key] = $params[$key];
+            }
+        }
+
+        if (isset($params['user_id'])) {
+            $payload['user_id'] = (int) $params['user_id'];
+        }
+
+        // A 404 on a collection POST cannot mean "record missing", so the route itself is absent:
+        // core registers it from plg_webservices_contact, which sites often leave disabled.
+        try {
+            return $this->rest->post(self::CONTACTS_PATH, $payload);
+        } catch (RequestException $e) {
+            if ($e->hasResponse() && $e->getResponse()->getStatusCode() === 404) {
+                throw new \RuntimeException(
+                    'The Joomla Web Services API has no contacts route. Core registers it from the '
+                    . 'plg_webservices_contact plugin, so enable "Web Services - Contact" in the Joomla plugin manager.',
+                    0,
+                    $e
+                );
+            }
+
+            throw $e;
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -6253,7 +6318,7 @@ class RpcService
      * when only one item changed; omit it when a definition change could affect any of them.
      *
      * com_content.article is the only context with cached read tools today (there are no contact
-     * or user tools, and category field values are not writable), so it is the only case here.
+     * or user read tools, and category field values are not writable), so it is the only case here.
      */
     private function invalidateFieldValueItemCaches(string $context, ?int $itemId = null): void
     {

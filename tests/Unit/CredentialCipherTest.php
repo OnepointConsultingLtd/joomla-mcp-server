@@ -40,6 +40,34 @@ class CredentialCipherTest extends TestCase
         $this->cipher('other-secret')->decrypt($encrypted);
     }
 
+    public function testEncodedFieldsUseTheBase64UrlAlphabet(): void
+    {
+        for ($i = 0; $i < 50; $i++) {
+            $encrypted = $this->cipher()->encrypt(random_bytes(64));
+            foreach (['ciphertext', 'nonce', 'tag'] as $field) {
+                $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]+$/D', $encrypted[$field]);
+            }
+        }
+    }
+
+    public function testDecryptsPayloadsWrittenByTheBroken1_10_1Build(): void
+    {
+        // The 1.8.0-1.10.1 packages shipped encode() as str_replace('+/', '-_', base64_encode(...)).
+        $legacy = static fn (string $encoded): string => rtrim(
+            str_replace('+/', '-_', base64_encode((string) base64_decode(strtr($encoded, '-_', '+/')))),
+            '='
+        );
+
+        for ($i = 0; $i < 50; $i++) {
+            $plaintext = random_bytes(64);
+            $encrypted = $this->cipher()->encrypt($plaintext);
+            foreach (['ciphertext', 'nonce', 'tag'] as $field) {
+                $encrypted[$field] = $legacy($encrypted[$field]);
+            }
+            $this->assertSame($plaintext, $this->cipher()->decrypt($encrypted));
+        }
+    }
+
     public function testInvalidKeyMaterialFailsClosed(): void
     {
         $this->expectException(\RuntimeException::class);

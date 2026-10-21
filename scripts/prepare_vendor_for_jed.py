@@ -182,8 +182,107 @@ def _split_top_level_args(argstr: str) -> list[str]:
     return args
 
 
+def _php_single_quoted(value: str) -> str:
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _parse_php_string_literal(expr: str) -> str | None:
+    """Return the value of a PHP string literal, or None if ``expr`` is not one we can evaluate."""
+    if len(expr) < 2 or expr[0] != expr[-1] or expr[0] not in "'\"":
+        return None
+    body = expr[1:-1]
+    if expr[0] == '"':
+        # Double-quoted escapes and interpolation are not worth emulating.
+        return body if not any(ch in body for ch in '\\$"') else None
+    value: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "'":
+            return None
+        if ch == "\\" and i + 1 < len(body) and body[i + 1] in "\\'":
+            value.append(body[i + 1])
+            i += 2
+            continue
+        value.append(ch)
+        i += 1
+    return "".join(value)
+
+
+def _order_for_sequential_replace(pairs: list[tuple[str, str]]) -> list[tuple[str, str]] | None:
+    """Order single-character search keys so str_replace() never rewrites an earlier replacement.
+
+    str_replace() with arrays applies each pair to the output of the previous one, while strtr()
+    translates every character once. They agree only if no replacement contains a key applied
+    after it. Returns None when no such order exists (e.g. swapping two characters).
+    """
+    remaining = list(pairs)
+    ordered: list[tuple[str, str]] = []
+    while remaining:
+        # A pair may go next if no other pending key occurs in its replacement.
+        ready = next(
+            (
+                pair
+                for pair in remaining
+                if not any(other[0] in pair[1] for other in remaining if other is not pair)
+            ),
+            None,
+        )
+        if ready is None:
+            return None
+        ordered.append(ready)
+        remaining.remove(ready)
+    return ordered
+
+
+def _str_replace_for_pairs(pairs: list[tuple[str, str]], subject: str) -> str | None:
+    ordered = _order_for_sequential_replace(pairs)
+    if ordered is None:
+        return None
+    if len(ordered) == 1:
+        search, replace = ordered[0]
+        return f"str_replace({_php_single_quoted(search)}, {_php_single_quoted(replace)}, {subject})"
+    searches = ", ".join(_php_single_quoted(search) for search, _ in ordered)
+    replaces = ", ".join(_php_single_quoted(replace) for _, replace in ordered)
+    return f"str_replace(array({searches}), array({replaces}), {subject})"
+
+
+def _is_single_char_expr(expr: str) -> bool:
+    if expr == "DIRECTORY_SEPARATOR":
+        return True
+    value = _parse_php_string_literal(expr)
+    return value is not None and len(value) == 1
+
+
+def _three_arg_strtr_to_str_replace(subject: str, from_expr: str, to_expr: str) -> str:
+    """Translate strtr(subject, from, to) into an equivalent str_replace() call.
+
+    strtr() maps characters one-for-one; str_replace('+/', '-_', $s) replaces only the literal
+    substring '+/'. Rewriting one into the other blindly shipped broken base64url encoding in
+    1.8.0-1.10.1, so anything we cannot prove equivalent fails the build instead.
+    """
+    if _is_single_char_expr(from_expr) and _is_single_char_expr(to_expr):
+        return f"str_replace({from_expr}, {to_expr}, {subject})"
+
+    from_value = _parse_php_string_literal(from_expr)
+    to_value = _parse_php_string_literal(to_expr)
+    if from_value is not None and to_value is not None:
+        # strtr() ignores the excess of the longer argument; a repeated key keeps its last target.
+        table = dict(zip(from_value, to_value))
+        pairs = [(search, replace) for search, replace in table.items() if search != replace]
+        if not pairs:
+            return subject
+        rewritten = _str_replace_for_pairs(pairs, subject)
+        if rewritten is not None:
+            return rewritten
+
+    raise ValueError(
+        f"cannot rewrite strtr({subject}, {from_expr}, {to_expr}) into an equivalent str_replace()"
+    )
+
+
 def _rewrite_three_arg_strtr(content: str) -> str:
-    """Rewrite strtr(subject, from, to) -> str_replace(from, to, subject) with paren-aware parsing."""
+    """Rewrite strtr(subject, from, to) into an equivalent str_replace() with paren-aware parsing."""
     result: list[str] = []
     pos = 0
     while True:
@@ -199,7 +298,7 @@ def _rewrite_three_arg_strtr(content: str) -> str:
         args = _split_top_level_args(content[match.end() : end - 1])
         result.append(content[pos : match.start()])
         if len(args) == 3:
-            result.append(f"str_replace({args[1]}, {args[2]}, {args[0]})")
+            result.append(_three_arg_strtr_to_str_replace(args[0], args[1], args[2]))
         else:
             result.append(content[match.start() : end])
         pos = end
@@ -215,6 +314,15 @@ def patch_strtr(content: str) -> str:
         pairs = re.findall(r"'((?:\\'|[^'])*)'\s*=>\s*'((?:\\'|[^'])*)'", body)
         if not pairs:
             return match.group(0)
+        values = [
+            (_parse_php_string_literal(f"'{key}'"), _parse_php_string_literal(f"'{value}'"))
+            for key, value in pairs
+        ]
+        if all(key is not None and len(key) == 1 and value is not None for key, value in values):
+            rewritten = _str_replace_for_pairs(values, subject)
+            if rewritten is None:
+                raise ValueError(f"cannot rewrite {match.group(0)} into an equivalent str_replace()")
+            return rewritten
         keys = ", ".join(f"'{key}'" for key, _ in pairs)
         values = ", ".join(f"'{value}'" for _, value in pairs)
         return f"str_replace(array({keys}), array({values}), {subject})"
@@ -265,7 +373,11 @@ def patch_php_file(path: Path) -> bool:
 def patch_php_tree(root: Path) -> list[str]:
     patched: list[str] = []
     for path in sorted(root.rglob("*.php")):
-        if patch_php_file(path):
+        try:
+            changed = patch_php_file(path)
+        except ValueError as error:
+            raise SystemExit(f"{path}: {error}") from error
+        if changed:
             patched.append(str(path.relative_to(root)))
     return patched
 

@@ -56,7 +56,10 @@ final class McpCredential
         }
 
         $token = substr($header, 7);
-        $pattern = '/^' . self::PREFIX . '([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{43})$/D';
+        // '+' and '/' are accepted for tokens issued by the 1.8.0-1.10.1 packages, whose build
+        // step broke encode() into emitting standard base64. The selector and secret are matched
+        // as stored, so those tokens keep working without being reissued.
+        $pattern = '/^' . self::PREFIX . '([A-Za-z0-9_+\/-]{16})\.([A-Za-z0-9_+\/-]{43})$/D';
         if (preg_match($pattern, $token, $matches) !== 1) {
             return null;
         }

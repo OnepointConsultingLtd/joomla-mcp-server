@@ -3,6 +3,21 @@
     <changelog>
         <element>com_mcpserver</element>
         <type>component</type>
+        <version>1.10.2</version>
+        <addition>
+            <item>Added create_contact, which creates a Joomla contact (com_contact).</item>
+        </addition>
+        <fix>
+            <item>Fixed every Governed Mode credential being refused with "Invalid or expired MCP credential" (-32001) (#41).</item>
+        </fix>
+        <change>
+            <item>Corrected two bundled libraries that had been altered by the JED-prep build step.</item>
+            <item>upload_media and update_media no longer return the uploaded file. MCP clients truncated or rejected it, so the agent reported a failed upload and retried into "File exists" although the first call had succeeded.</item>
+        </change>
+    </changelog>
+    <changelog>
+        <element>com_mcpserver</element>
+        <type>component</type>
         <version>1.10.1</version>
         <fix>
             <item>Fixed every request failing on Joomla 4 with "Key Psr\Log\LoggerInterface is protected and can't be overwritten" (#39).</item>

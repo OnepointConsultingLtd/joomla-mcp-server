@@ -20,7 +20,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 90 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 95 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -57,6 +57,18 @@ The component exposes 90 tools grouped by Joomla domain. List tools include a `p
 | Tool | Description |
 |---|---|
 | `create_contact` | Create a Joomla contact in a contact category (requires the Web Services - Contact plugin) |
+
+### Redirects
+
+| Tool | Description |
+|---|---|
+| `list_redirects` | List redirect links, filtered by text, state, status code or missing destination (collected 404s) and sorted by any column, e.g. by hits |
+| `get_redirect` | Retrieve a redirect link by ID |
+| `create_redirect` | Create a redirect link from a source URL to a destination URL |
+| `update_redirect` | Update a redirect link; only the fields sent change |
+| `delete_redirect` | Delete a redirect link (trashes first, then deletes) |
+
+Joomla only acts on redirect links while the **System - Redirect** plugin is enabled, which it is not on a fresh install, and only for requests that would otherwise return 404. Use `list_extensions` and `set_extension_state` to check and enable it. Status codes other than 301, and links with no destination, need the Redirect component's Advanced Mode. Joomla's Web Services API lists enabled and disabled links only, never archived or trashed ones.
 
 ### Article versions
 
@@ -255,7 +267,7 @@ Two Joomla behaviours are worth knowing before using them. `update_field` merges
 
 ### Not covered (by design)
 
-User management, Joomla global configuration, contacts, banners and redirects are deliberately not exposed as tools. User accounts and global configuration in particular would widen the blast radius of a leaked bearer token well beyond content management. If your workflow needs one of these domains, open an issue — they are candidates for opt-in tools in a future release.
+User management, Joomla global configuration, contacts and banners are deliberately not exposed as tools. User accounts and global configuration in particular would widen the blast radius of a leaked bearer token well beyond content management. If your workflow needs one of these domains, open an issue — they are candidates for opt-in tools in a future release.
 
 ## MCP Resources
 
@@ -435,7 +447,7 @@ For `2026-07-28` requests:
 - Results carry `resultType: "complete"` and the server's name and version in `_meta`. `server/discover`, `tools/list`, `prompts/list` and `resources/templates/list` add `ttlMs: 300000` and `cacheScope: "public"`; `resources/list` and `resources/read` add the **Cache TTL** option (in milliseconds) and `cacheScope: "private"`, because in Governed Mode they are read with the caller's own token.
 - `subscriptions/listen` is answered as an event stream: an acknowledgement with an empty filter, then the closing result. The server advertises no change notifications (`listChanged` and `subscribe` are false), so it ends the stream at once rather than holding a PHP worker open; clients should re-fetch on the `ttlMs` hints rather than reconnect.
 - `structuredContent` may be any JSON value. For earlier revisions it is sent only when the result is a JSON object; the text content always carries the full result.
-- Tools whose schema marks `id`, `version_id`, `extension_id` or `catid` with `x-mcp-header` (48 tools) also need the matching `Mcp-Param-Id`, `Mcp-Param-Version-Id`, `Mcp-Param-Extension-Id` or `Mcp-Param-Catid` header whenever that argument is sent, so gateways can route or audit on the target without reading the body. A missing or mismatched header gets HTTP 400 with `-32020`. The bundled bridge sends them.
+- Tools whose schema marks `id`, `version_id`, `extension_id` or `catid` with `x-mcp-header` (52 tools) also need the matching `Mcp-Param-Id`, `Mcp-Param-Version-Id`, `Mcp-Param-Extension-Id` or `Mcp-Param-Catid` header whenever that argument is sent, so gateways can route or audit on the target without reading the body. A missing or mismatched header gets HTTP 400 with `-32020`. The bundled bridge sends them.
 
 For every revision:
 

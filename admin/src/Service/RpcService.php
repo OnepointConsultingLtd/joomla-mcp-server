@@ -4849,7 +4849,7 @@ class RpcService
         if (count($allIds) === 1) {
             // Caller wants to clear associations; just remove rows for the primary.
             $this->deleteAssociationsForIds($context, $allIds);
-            $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+            $this->invalidateAssociationCaches($context);
             return $this->loadAssociations($context, $primaryId);
         }
 
@@ -4892,8 +4892,22 @@ class RpcService
             $db->insertObject('#__associations', $row);
         }
 
-        $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+        $this->invalidateAssociationCaches($context);
         return $this->loadAssociations($context, $primaryId);
+    }
+
+    /**
+     * Joomla's article and menu item API output embeds each item's associations, so the
+     * cached single-item reads go stale alongside the association lists.
+     */
+    private function invalidateAssociationCaches(string $context): void
+    {
+        $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+        if ($context === self::ASSOC_CONTEXT_ARTICLE) {
+            $this->cache->deleteByPrefix('article:');
+        } elseif ($context === self::ASSOC_CONTEXT_MENU_ITEM) {
+            $this->cache->deleteByPrefix('menu_item:');
+        }
     }
 
     private function loadItemsForAssociation(string $context, array $ids): array

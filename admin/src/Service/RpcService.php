@@ -3686,6 +3686,9 @@ class RpcService
             throw new \RuntimeException('Failed to read source_path');
         }
 
+        // A package staged by task=rpc.upload is single-use.
+        (new PackageUploadService((string) Factory::getApplication()->get('tmp_path')))->consume($real);
+
         return $bytes;
     }
 

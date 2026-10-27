@@ -29,6 +29,8 @@ use Joomla\Component\Mcpserver\Administrator\Service\McpHttpTransport;
 use Joomla\Component\Mcpserver\Administrator\Service\McpProtocolError;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
+use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadException;
+use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
 use Joomla\Component\Mcpserver\Administrator\Service\PrincipalCache;
 use Joomla\Component\Mcpserver\Administrator\Service\PromptRegistry;
@@ -419,6 +421,114 @@ trait RpcHandlerTrait
         }
 
         $app->close();
+    }
+
+    /**
+     * Stage an extension package POSTed as the multipart/form-data field "file"
+     * and answer with the source_path install_extension takes. A tool argument
+     * cannot carry a large file (see PackageUploadService), so this is how a
+     * package on the client's disk reaches the server.
+     *
+     * Admitted like handle() — rate limit, Origin, then auth — and refused
+     * whenever install_extension itself would be, so the endpoint never stores
+     * a file for a caller who could not install it.
+     */
+    public function upload(): void
+    {
+        $startTime = microtime(true);
+        $app = Factory::getApplication();
+        $context = $app->getName() === 'administrator' ? 'admin' : 'site';
+
+        header('Content-Type: application/json; charset=utf-8');
+
+        $params = ComponentHelper::getParams('com_mcpserver');
+
+        $this->handleCors($params);
+
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            header('Allow: POST, OPTIONS');
+            http_response_code(405);
+            $app->close();
+            return;
+        }
+
+        $authService = $this->resolveService(AuthService::class) ?? new AuthService($params);
+        $clientIp    = $authService->getClientIp() ?: 'unknown';
+
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimit = $rateLimiter->checkLimit($clientIp);
+        if ($rateLimit !== null) {
+            header('Retry-After: ' . $rateLimit['retry_after']);
+            $this->rejectUpload($startTime, 429, JsonRpc::RATE_LIMITED, 'Rate limit exceeded', 'rate_limited', $clientIp, $context, null);
+            return;
+        }
+
+        if (!$this->isOriginAcceptable($params)) {
+            $this->rejectOrigin($startTime, $clientIp, $context);
+            return;
+        }
+
+        $principal = $authService->authenticatePrincipal();
+        $authError = $principal !== null ? null : $authService->authenticate();
+        if ($authError !== null) {
+            $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
+            $this->rejectUpload($startTime, $code, $authError['code'], $authError['error'], 'auth_failed', $clientIp, $context, null);
+            return;
+        }
+
+        $policy = new PolicyService($params);
+        $denial = match (true) {
+            !$policy->isToolAllowed('install_extension') => 'install_extension is disabled in MCP Server options',
+            $policy->isReadOnly() => 'Read-only mode is enabled',
+            $principal !== null && !$this->createGovernedToolAuthorizer()->authorise($principal, 'install_extension', []) => 'Not authorised to install extensions',
+            default => null,
+        };
+        if ($denial !== null) {
+            $this->rejectUpload($startTime, 403, JsonRpc::FORBIDDEN, $denial, 'blocked', $clientIp, $context, $principal);
+            return;
+        }
+
+        try {
+            $stored = (new PackageUploadService((string) $app->get('tmp_path')))->store(
+                $app->input->files->get('file', null, 'raw'),
+                (int) ($_SERVER['CONTENT_LENGTH'] ?? 0)
+            );
+        } catch (PackageUploadException $e) {
+            $this->rejectUpload(
+                $startTime,
+                $e->httpStatus,
+                $e->httpStatus >= 500 ? JsonRpc::INTERNAL_ERROR : JsonRpc::INVALID_PARAMS,
+                $e->getMessage(),
+                $e->httpStatus >= 500 ? 'error' : 'invalid_request',
+                $clientIp,
+                $context,
+                $principal
+            );
+            return;
+        }
+
+        $this->recordGovernanceAudit(
+            $startTime, 'upload', '', 'ok', null, 201, $clientIp, $context, $principal, null, 'path=' . basename($stored['source_path'])
+        );
+        http_response_code(201);
+        echo json_encode($stored, JSON_UNESCAPED_SLASHES);
+        $app->close();
+    }
+
+    private function rejectUpload(
+        float $startTime,
+        int $httpStatus,
+        int $errorCode,
+        string $message,
+        string $status,
+        string $clientIp,
+        string $context,
+        ?AuthenticatedPrincipal $principal
+    ): void {
+        http_response_code($httpStatus);
+        echo json_encode(JsonRpc::errorResponse(null, $errorCode, $message));
+        $this->recordGovernanceAudit($startTime, 'upload', '', $status, $errorCode, $httpStatus, $clientIp, $context, $principal, null, null);
+        Factory::getApplication()->close();
     }
 
     /**

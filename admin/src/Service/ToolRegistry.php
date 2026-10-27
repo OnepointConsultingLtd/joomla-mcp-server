@@ -1089,6 +1089,9 @@ class ToolRegistry
                 . '`source_path` (absolute path to a .zip already on the Joomla server), '
                 . 'or base64 `content` (small packages only). '
                 . 'Do not read local .zip files in the MCP client and pass them as content — MCP clients cannot read large binary files. '
+                . 'To install a local .zip, first POST it as the multipart/form-data field `file` to this MCP endpoint\'s URL with `task=rpc.upload` '
+                . 'in place of `task=rpc.handle`, sending the same Authorization header (e.g. `curl -H "Authorization: Bearer <token>" -F file=@package.zip "<url>"`), '
+                . 'then pass the `source_path` it returns. An uploaded package can be installed once and expires after an hour. '
                 . 'WARNING: this is arbitrary code execution — only allow trusted callers.',
             'inputSchema' => [
                 'type' => 'object',
@@ -1103,7 +1106,7 @@ class ToolRegistry
                     ],
                     'source_path' => [
                         'type' => 'string',
-                        'description' => 'Absolute path on the Joomla server to an existing .zip file (must be under tmp_path or the site root)',
+                        'description' => 'Absolute path on the Joomla server to an existing .zip file (must be under tmp_path or the site root), such as the source_path returned by task=rpc.upload',
                     ],
                 ],
             ],

@@ -162,10 +162,20 @@ Article versioning tools require Joomla article versioning to be enabled.
 | `set_extension_state` | Enable or disable an installed extension (e.g. activate a plugin after installing it) |
 | `get_extension_params` | Read an extension's saved Options, plus the option definitions its manifest declares (name, type, default, list options) |
 | `update_extension_params` | Update an extension's saved Options, merging into the stored values — only the keys you send change |
-| `install_extension` | Install a Joomla extension from a base64 zip or a download URL (arbitrary code execution — restrict to trusted callers) |
+| `install_extension` | Install a Joomla extension from a download URL, a zip already on the server (`source_path`, e.g. one staged with `task=rpc.upload`) or a small base64 zip (arbitrary code execution — restrict to trusted callers) |
 | `uninstall_extension` | Uninstall an extension by `extension_id` (protected/locked core extensions are refused) |
 
 `install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in. The extension params tools and the custom field tools are disabled by default too, for different reasons — see below.
+
+A tool argument cannot carry a large file: the model would have to write the whole package out as base64. To install a zip from the client's disk, upload it to the same endpoint with `task=rpc.upload` and the same `Authorization` header, then pass the returned `source_path` to `install_extension`:
+
+```bash
+curl -H "Authorization: Bearer $MCP_BEARER_TOKEN" -F file=@tpl_example.zip \
+  "https://example.com/index.php?option=com_mcpserver&task=rpc.upload"
+# {"source_path":"/var/www/tmp/mcp-upload-3f9c….zip","size":482113}
+```
+
+The upload is refused (403) whenever `install_extension` would be: while it is disabled, in read-only mode, or in Governed Mode for a user without site-wide `core.admin`. A staged package can be installed once, is deleted when it is, and otherwise expires after an hour. PHP's `upload_max_filesize` and `post_max_size` limit its size (413 when exceeded).
 
 #### Extension Options
 
@@ -404,6 +414,7 @@ Disabling **Governed Mode** in **Options → Security Settings** is the rollback
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/index.php?option=com_mcpserver&task=rpc.handle` | MCP JSON-RPC endpoint in the site application (Streamable HTTP, every protocol version) |
+| `POST` | `/index.php?option=com_mcpserver&task=rpc.upload` | Stage an extension package (multipart field `file`) for `install_extension`'s `source_path` |
 | `GET` | `/index.php?option=com_mcpserver&task=rpc.sse` | Legacy HTTP+SSE stream for 2024-11-05 clients (the bundled bridge does not use it) |
 | `GET` | `/index.php?option=com_mcpserver&task=health.ping` | Site health endpoint |
 | `POST` | `/administrator/index.php?option=com_mcpserver&task=rpc.handle` | MCP JSON-RPC endpoint in the administrator application |

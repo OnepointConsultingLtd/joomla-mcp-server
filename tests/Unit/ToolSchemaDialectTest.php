@@ -33,6 +33,8 @@ class ToolSchemaDialectTest extends TestCase
         'pattern', 'minItems', 'maxItems', 'uniqueItems', 'format',
         // An annotation (Mcp-Param-* headers) that validators ignore.
         'x-mcp-header',
+        // An annotation telling the bridge to read a client-side file into another argument.
+        'x-mcp-local-file',
     ];
 
     public function testEveryToolInputSchemaIsAnObjectSchema(): void

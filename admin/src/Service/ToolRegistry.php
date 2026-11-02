@@ -15,6 +15,14 @@ defined('_JEXEC') or die;
 class ToolRegistry
 {
     /** Repeated verbatim by every com_fields tool schema; the six contexts core Joomla declares. */
+    /**
+     * local_path is resolved on the client: the bundled bridge reads the file and
+     * sends it as the x-mcp-local-file target, so its bytes never pass through
+     * the model. The server only sees it when a client connects without the bridge.
+     */
+    private const LOCAL_PATH_DESCRIPTION = 'Path to the file on this computer (absolute, or ~/...). The MCP bridge reads it and uploads it; '
+        . 'cheapest way to send a local file. Needs the bundled mcp-http-bridge.js or Claude Desktop extension.';
+
     private const FIELD_CONTEXT_DESCRIPTION = 'Joomla custom field context. One of: com_content.article, com_content.categories, com_contact.contact, com_contact.mail, com_contact.categories, com_users.user';
 
     /**
@@ -716,11 +724,18 @@ class ToolRegistry
 
         $this->register([
             'name' => 'upload_media',
-            'description' => 'Upload a new Joomla media file. Provide either base64 "content" or a "source_url" the server will fetch and encode. Cannot overwrite an existing file (use update_media for that).',
+            'description' => 'Upload a new Joomla media file (image, video, PDF, etc.). For a file on this computer pass its path as "local_path" — '
+                . 'never read or base64-encode the file yourself. Otherwise give "source_url" for the server to fetch, or base64 "content" for tiny files. '
+                . 'Cannot overwrite an existing file (use update_media for that).',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
                     'path' => ['type' => 'string', 'description' => 'Destination path including filename (e.g. "banners/logo.png")'],
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => ['type' => 'string', 'description' => 'Base64-encoded file contents'],
                     'source_url' => ['type' => 'string', 'description' => 'URL the server will download and base64-encode'],
                 ],
@@ -756,12 +771,18 @@ class ToolRegistry
 
         $this->register([
             'name' => 'update_media',
-            'description' => 'Rename, move or replace the contents of an existing Joomla media file or folder. Provide at least one of "new_path", "content" or "source_url".',
+            'description' => 'Rename, move or replace the contents of an existing Joomla media file or folder. Provide at least one of "new_path", "local_path", "source_url" or "content" '
+                . '(for a replacement file on this computer use "local_path" — never read or base64-encode it yourself).',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
                     'path' => ['type' => 'string', 'description' => 'Current file or folder path'],
                     'new_path' => ['type' => 'string', 'description' => 'New path to move or rename to'],
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => ['type' => 'string', 'description' => 'Replacement file contents as base64'],
                     'source_url' => ['type' => 'string', 'description' => 'URL the server will download and base64-encode as the replacement contents'],
                 ],
@@ -1085,20 +1106,25 @@ class ToolRegistry
         $this->register([
             'name' => 'install_extension',
             'description' => 'Install a Joomla extension from a zip package. '
-                . 'Provide exactly one of: `source_url` (preferred — server downloads the package), '
+                . 'Provide exactly one of: `local_path` (a .zip on this computer), `source_url` (server downloads the package), '
                 . '`source_path` (absolute path to a .zip already on the Joomla server), '
                 . 'or base64 `content` (small packages only). '
                 . 'Do not read local .zip files in the MCP client and pass them as content — MCP clients cannot read large binary files. '
-                . 'To install a local .zip, first POST it as the multipart/form-data field `file` to this MCP endpoint\'s URL with `task=rpc.upload` '
+                . 'If local_path is refused because the client connects without the bundled bridge, POST it as the multipart/form-data field `file` to this MCP endpoint\'s URL with `task=rpc.upload` '
                 . 'in place of `task=rpc.handle`, sending the same Authorization header (e.g. `curl -H "Authorization: Bearer <token>" -F file=@package.zip "<url>"`), '
                 . 'then pass the `source_path` it returns. An uploaded package can be installed once and expires after an hour. '
                 . 'WARNING: this is arbitrary code execution — only allow trusted callers.',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => [
                         'type' => 'string',
-                        'description' => 'Base64-encoded contents of the .zip package (small packages only; prefer source_url or source_path)',
+                        'description' => 'Base64-encoded contents of the .zip package (small packages only; prefer local_path, source_url or source_path)',
                     ],
                     'source_url' => [
                         'type' => 'string',

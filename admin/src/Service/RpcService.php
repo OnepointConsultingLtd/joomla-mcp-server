@@ -2697,9 +2697,45 @@ class RpcService
         return $result;
     }
 
+    /**
+     * Media type code → the com_media option listing its extensions, and the
+     * default Joomla's media ApiModel falls back to when the option is unset.
+     */
+    private const MEDIA_TYPE_EXTENSION_OPTIONS = [
+        '0' => ['image_extensions', 'bmp,gif,jpg,jpeg,png,webp'],
+        '1' => ['audio_extensions', 'mp3,m4a,mp4a,ogg'],
+        '2' => ['video_extensions', 'mp4,mp4v,mpeg,mov,webm'],
+        '3' => ['doc_extensions', 'doc,odg,odp,ods,odt,pdf,ppt,txt,xcf,xls,csv'],
+    ];
+
+    private ?string $mediaTypes = null;
+
+    /**
+     * The "mediatypes" value for Joomla's media API: every type with extensions
+     * configured in the Media options. The API accepts only the types it is
+     * given and assumes images only when there is none, so listing would hide
+     * videos and PDFs and every other call would refuse them as "File type not
+     * allowed". Which extensions each type covers stays Joomla's decision.
+     */
+    private function mediaTypes(): string
+    {
+        if ($this->mediaTypes === null) {
+            $params = \Joomla\CMS\Component\ComponentHelper::getParams('com_media');
+            $types = [];
+            foreach (self::MEDIA_TYPE_EXTENSION_OPTIONS as $code => [$option, $default]) {
+                if (trim((string) $params->get($option, $default), " ,") !== '') {
+                    $types[] = (string) $code;
+                }
+            }
+            $this->mediaTypes = implode(',', $types);
+        }
+
+        return $this->mediaTypes;
+    }
+
     private function listMedia(array $params): array
     {
-        $query = [];
+        $query = ['mediatypes' => $this->mediaTypes()];
         if (isset($params['path']) && $params['path'] !== '') {
             $query['path'] = (string) $params['path'];
         }
@@ -2729,7 +2765,7 @@ class RpcService
             throw new \InvalidArgumentException('path is required');
         }
 
-        $query = [];
+        $query = ['mediatypes' => $this->mediaTypes()];
         if (($params['include_url'] ?? true)) {
             $query['url'] = 1;
         }
@@ -2752,10 +2788,10 @@ class RpcService
 
         $content = $this->resolveMediaContent($params);
         if ($content === null) {
-            throw new \InvalidArgumentException('Either content or source_url is required');
+            throw new \InvalidArgumentException('One of local_path, source_url or content is required');
         }
 
-        $result = $this->rest->post('api/index.php/v1/media/files', [
+        $result = $this->rest->post('api/index.php/v1/media/files?mediatypes=' . $this->mediaTypes(), [
             'path' => $path,
             'content' => $content,
         ]);
@@ -2795,10 +2831,13 @@ class RpcService
         }
 
         if (empty($payload)) {
-            throw new \InvalidArgumentException('Provide at least one of new_path, content or source_url');
+            throw new \InvalidArgumentException('Provide at least one of new_path, local_path, source_url or content');
         }
 
-        $result = $this->rest->patch('api/index.php/v1/media/files/' . $this->mediaItemPath($path), $payload);
+        $result = $this->rest->patch(
+            'api/index.php/v1/media/files/' . $this->mediaItemPath($path) . '?mediatypes=' . $this->mediaTypes(),
+            $payload
+        );
         $this->cache->deleteByPrefix('media_');
         return $this->withoutEchoedMediaContent($result);
     }
@@ -2810,6 +2849,22 @@ class RpcService
      * which MCP clients truncate or reject; the agent then reports a failed upload and retries
      * into "File exists" although the first call succeeded.
      */
+    /**
+     * local_path names a file on the client's machine, which the bundled bridge
+     * swaps for "content" before the call is sent. Reaching the server means the
+     * client connects without the bridge, and the path means nothing here.
+     */
+    private function assertNoUnresolvedLocalPath(array $params): void
+    {
+        if (isset($params['local_path']) && $params['local_path'] !== '') {
+            throw new \InvalidArgumentException(
+                'local_path is read by the bundled MCP bridge (mcp-http-bridge.js or the Claude Desktop extension), '
+                . 'and this client is not connected through it. Use source_url, or base64 content for small files, '
+                . 'or connect the client through the bridge.'
+            );
+        }
+    }
+
     private function withoutEchoedMediaContent(array $result): array
     {
         unset($result['data']['attributes']['content']);
@@ -2824,13 +2879,15 @@ class RpcService
             throw new \InvalidArgumentException('path is required');
         }
 
-        $result = $this->rest->delete('api/index.php/v1/media/files/' . $this->mediaItemPath($path));
+        $result = $this->rest->delete('api/index.php/v1/media/files/' . $this->mediaItemPath($path) . '?mediatypes=' . $this->mediaTypes());
         $this->cache->deleteByPrefix('media_');
         return $result;
     }
 
     private function resolveMediaContent(array $params): ?string
     {
+        $this->assertNoUnresolvedLocalPath($params);
+
         $hasContent = isset($params['content']) && $params['content'] !== '';
         $hasUrl = isset($params['source_url']) && $params['source_url'] !== '';
 
@@ -3622,6 +3679,8 @@ class RpcService
 
     private function resolveExtensionPackageBytes(array $params): string
     {
+        $this->assertNoUnresolvedLocalPath($params);
+
         $hasContent = isset($params['content']) && $params['content'] !== '';
         $hasUrl     = isset($params['source_url']) && $params['source_url'] !== '';
         $hasPath    = isset($params['source_path']) && $params['source_path'] !== '';

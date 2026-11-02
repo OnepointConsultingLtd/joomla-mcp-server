@@ -20,6 +20,9 @@
 
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { URL } = require('url');
 
 const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
@@ -31,6 +34,11 @@ const NAME_SOURCES = {
     'prompts/get': 'name',
     'resources/read': 'uri',
 };
+
+// The argument name the server's tools use for a file on this machine. A call
+// carrying it before the bridge has seen the tool's schema triggers a refresh,
+// since only the schema's x-mcp-local-file annotation says where it goes.
+const LOCAL_FILE_ARGUMENT = 'local_path';
 
 const BASE64_PREFIX = '=?base64?';
 const BASE64_SUFFIX = '?=';
@@ -130,6 +138,69 @@ function paramHeadersFromTools(tools) {
 }
 
 /**
+ * Tool name → [[property, target]] from a tools/list result's x-mcp-local-file
+ * annotations: the property names a file on this machine, which the bridge
+ * reads and sends base64-encoded as the target argument instead.
+ */
+function localFileArgsFromTools(tools) {
+    const map = new Map();
+    for (const tool of Array.isArray(tools) ? tools : []) {
+        if (!tool || typeof tool.name !== 'string') {
+            continue;
+        }
+        const properties = tool.inputSchema && typeof tool.inputSchema.properties === 'object' ? tool.inputSchema.properties : {};
+        const pairs = [];
+        for (const [property, schema] of Object.entries(properties || {})) {
+            if (schema && typeof schema['x-mcp-local-file'] === 'string') {
+                pairs.push([property, schema['x-mcp-local-file']]);
+            }
+        }
+        map.set(tool.name, pairs);
+    }
+
+    return map;
+}
+
+function resolveLocalPath(value) {
+    const text = String(value).trim();
+    if (text === '~' || text.startsWith('~/') || text.startsWith('~\\')) {
+        return path.join(os.homedir(), text.slice(1));
+    }
+
+    return path.resolve(text);
+}
+
+/**
+ * The arguments with each local-file property replaced by the file's bytes,
+ * base64-encoded, under its target. This is the point of the annotation: the
+ * file goes from disk to the server without the model ever writing it out.
+ * Throws an Error whose message is meant for the model.
+ */
+async function inlineLocalFiles(args, pairs, readFile = fs.promises.readFile) {
+    const resolved = { ...args };
+    for (const [property, target] of pairs) {
+        const value = resolved[property];
+        if (value === undefined || value === null || value === '') {
+            continue;
+        }
+        delete resolved[property];
+        if (resolved[target] !== undefined && resolved[target] !== null && resolved[target] !== '') {
+            throw new Error(`Provide either ${property} or ${target}, not both`);
+        }
+        const file = resolveLocalPath(value);
+        let bytes;
+        try {
+            bytes = await readFile(file);
+        } catch (error) {
+            throw new Error(`${property}: cannot read ${file} on the machine running the MCP bridge (${error.code || error.message})`);
+        }
+        resolved[target] = bytes.toString('base64');
+    }
+
+    return resolved;
+}
+
+/**
  * The JSON-RPC messages of a Server-Sent Events body, in order. Comment lines
  * (keep-alives) and events without data are skipped.
  */
@@ -158,6 +229,7 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
     // request's connection is the cancellation signal.
     const inFlight = new Map();
     const toolParamHeaders = new Map();
+    const toolLocalFiles = new Map();
 
     /**
      * POST one message and resolve with every JSON-RPC message the server
@@ -308,6 +380,41 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
         return { ...lastResponse, id: message.id, result };
     }
 
+    function learnTools(requestId, params, flight) {
+        return fetchAllListPages(
+            { jsonrpc: '2.0', id: `${requestId}-tools`, method: 'tools/list', params: { _meta: protocolMeta(params?._meta) } },
+            'tools',
+            flight
+        ).then((listed) => remember({ method: 'tools/list' }, listed));
+    }
+
+    /**
+     * The tools/call message with any local file read into its arguments, or
+     * an isError tool result when the file cannot be sent.
+     */
+    async function withLocalFiles(message, flight) {
+        const params = message.params || {};
+        const args = params.arguments && typeof params.arguments === 'object' ? params.arguments : null;
+        if (!args) {
+            return { message };
+        }
+        if (!toolLocalFiles.has(params.name) && args[LOCAL_FILE_ARGUMENT] !== undefined) {
+            await learnTools(message.id, params, flight);
+        }
+        const pairs = toolLocalFiles.get(params.name) || [];
+        if (pairs.length === 0) {
+            return { message };
+        }
+        try {
+            const resolved = await inlineLocalFiles(args, pairs);
+            return { message: { ...message, params: { ...params, arguments: resolved } } };
+        } catch (error) {
+            return {
+                result: { jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: error.message }], isError: true } },
+            };
+        }
+    }
+
     function cancel(requestId) {
         const flight = inFlight.get(requestId);
         if (flight) {
@@ -330,6 +437,9 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
         if (Array.isArray(result.tools)) {
             for (const [name, pairs] of paramHeadersFromTools(result.tools)) {
                 toolParamHeaders.set(name, pairs);
+            }
+            for (const [name, pairs] of localFileArgsFromTools(result.tools)) {
+                toolLocalFiles.set(name, pairs);
             }
         }
         if (message.method === 'initialize' && typeof result.protocolVersion === 'string') {
@@ -354,10 +464,19 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
                 return;
             }
 
-            const message = { jsonrpc: '2.0', id: requestId, method, params };
+            let message = { jsonrpc: '2.0', id: requestId, method, params };
             if (requestId !== undefined) {
                 flight = { cancelled: false, req: null };
                 inFlight.set(requestId, flight);
+            }
+
+            if (method === 'tools/call') {
+                const prepared = await withLocalFiles(message, flight);
+                if (prepared.result) {
+                    write(prepared.result);
+                    return;
+                }
+                message = prepared.message;
             }
 
             const itemsKey = PAGINATED_LIST_METHODS[method];
@@ -377,12 +496,7 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
             // once, as the transport spec advises on HeaderMismatch.
             const mismatch = responses.some((r) => r && r.error && r.error.code === -32020);
             if (method === 'tools/call' && mismatch && !toolParamHeaders.has(params?.name)) {
-                const listed = await fetchAllListPages(
-                    { jsonrpc: '2.0', id: `${requestId}-tools`, method: 'tools/list', params: { _meta: protocolMeta(params?._meta) } },
-                    'tools',
-                    flight
-                );
-                remember({ method: 'tools/list' }, listed);
+                await learnTools(requestId, params, flight);
                 if (toolParamHeaders.has(params?.name)) {
                     responses = (await post({ ...message, id: `${requestId}-retry` }, flight, relayNotification))
                         .map((r) => ('id' in r ? { ...r, id: requestId } : r));
@@ -483,7 +597,15 @@ function main() {
     process.on('SIGTERM', () => process.exit(0));
 }
 
-module.exports = { encodeHeaderValue, buildMcpHeaders, parseSseMessages, paramHeadersFromTools, createBridge };
+module.exports = {
+    encodeHeaderValue,
+    buildMcpHeaders,
+    parseSseMessages,
+    paramHeadersFromTools,
+    localFileArgsFromTools,
+    inlineLocalFiles,
+    createBridge,
+};
 
 if (require.main === module) {
     main();

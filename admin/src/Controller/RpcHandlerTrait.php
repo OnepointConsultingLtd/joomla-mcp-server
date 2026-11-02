@@ -264,6 +264,22 @@ trait RpcHandlerTrait
         }
 
         $body = file_get_contents('php://input') ?: '';
+
+        // PHP discards a body over post_max_size, which would otherwise read as a
+        // parse error — misleading for an upload_media call carrying a large file.
+        $postMax = PackageUploadService::iniBytes((string) ini_get('post_max_size'));
+        if ($body === '' && $postMax > 0 && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > $postMax) {
+            http_response_code(413);
+            echo json_encode(JsonRpc::errorResponse(
+                null,
+                JsonRpc::INVALID_REQUEST,
+                'Request exceeds the server\'s post_max_size (' . ini_get('post_max_size') . '); raise it in php.ini or send a smaller file'
+            ));
+            $this->recordGovernanceAudit($startTime, '', '', 'invalid_request', JsonRpc::INVALID_REQUEST, 413, $clientIp, $context, $principal, null, null, $headerVersion);
+            $app->close();
+            return;
+        }
+
         $decoded = json_decode($body, true);
 
         if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {

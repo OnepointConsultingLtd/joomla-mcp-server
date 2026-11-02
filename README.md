@@ -125,6 +125,8 @@ Article versioning tools require Joomla article versioning to be enabled.
 | `update_media` | Rename, move or replace an existing media file or folder |
 | `delete_media` | Delete a Joomla media file or folder by path |
 
+To upload a file from the client's computer, pass its path as `local_path`, e.g. `upload_media {"path": "banners/logo.png", "local_path": "~/Pictures/logo.png"}`. The bundled bridge (`mcp-http-bridge.js`, also inside the `.mcpb` Claude Desktop extension) reads the file and sends it as `content`. The model writes only the path, so a file costs a few tokens and never needs a separate `curl` step. `local_path` is marked in the tool schema with `x-mcp-local-file`, and `update_media` and `install_extension` accept it too. A client that connects over HTTP without the bridge gets an error naming the alternatives (`source_url`, or base64 `content` for small files). The request carries the file base64-encoded, so PHP's `post_max_size` caps the size at about three quarters of its value (413 when exceeded), and com_media's own *Maximum Size* and allowed-extension options still apply.
+
 ### Content languages
 
 | Tool | Description |
@@ -179,7 +181,7 @@ Article versioning tools require Joomla article versioning to be enabled.
 
 `install_extension`, `uninstall_extension` and `update_template_file` are **disabled by default** because they allow code execution on the server. Remove them from the Disabled Tools list in the component options to opt in. The extension params tools and the custom field tools are disabled by default too, for different reasons — see below.
 
-A tool argument cannot carry a large file: the model would have to write the whole package out as base64. To install a zip from the client's disk, upload it to the same endpoint with `task=rpc.upload` and the same `Authorization` header, then pass the returned `source_path` to `install_extension`:
+A tool argument cannot carry a large file: the model would have to write the whole package out as base64. Through the bundled bridge, pass the zip's path as `local_path` (see [Media](#media)). Otherwise, to install a zip from the client's disk, upload it to the same endpoint with `task=rpc.upload` and the same `Authorization` header, then pass the returned `source_path` to `install_extension`:
 
 ```bash
 curl -H "Authorization: Bearer $MCP_BEARER_TOKEN" -F file=@tpl_example.zip \

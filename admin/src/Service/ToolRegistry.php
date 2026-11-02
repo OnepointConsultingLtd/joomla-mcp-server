@@ -15,6 +15,14 @@ defined('_JEXEC') or die;
 class ToolRegistry
 {
     /** Repeated verbatim by every com_fields tool schema; the six contexts core Joomla declares. */
+    /**
+     * local_path is resolved on the client: the bundled bridge reads the file and
+     * sends it as the x-mcp-local-file target, so its bytes never pass through
+     * the model. The server only sees it when a client connects without the bridge.
+     */
+    private const LOCAL_PATH_DESCRIPTION = 'Path to the file on this computer (absolute, or ~/...). The MCP bridge reads it and uploads it; '
+        . 'cheapest way to send a local file. Needs the bundled mcp-http-bridge.js or Claude Desktop extension.';
+
     private const FIELD_CONTEXT_DESCRIPTION = 'Joomla custom field context. One of: com_content.article, com_content.categories, com_contact.contact, com_contact.mail, com_contact.categories, com_users.user';
 
     /**
@@ -716,11 +724,18 @@ class ToolRegistry
 
         $this->register([
             'name' => 'upload_media',
-            'description' => 'Upload a new Joomla media file. Provide either base64 "content" or a "source_url" the server will fetch and encode. Cannot overwrite an existing file (use update_media for that).',
+            'description' => 'Upload a new Joomla media file (image, video, PDF, etc.). For a file on this computer pass its path as "local_path" — '
+                . 'never read or base64-encode the file yourself. Otherwise give "source_url" for the server to fetch, or base64 "content" for tiny files. '
+                . 'Cannot overwrite an existing file (use update_media for that).',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
                     'path' => ['type' => 'string', 'description' => 'Destination path including filename (e.g. "banners/logo.png")'],
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => ['type' => 'string', 'description' => 'Base64-encoded file contents'],
                     'source_url' => ['type' => 'string', 'description' => 'URL the server will download and base64-encode'],
                 ],
@@ -756,12 +771,18 @@ class ToolRegistry
 
         $this->register([
             'name' => 'update_media',
-            'description' => 'Rename, move or replace the contents of an existing Joomla media file or folder. Provide at least one of "new_path", "content" or "source_url".',
+            'description' => 'Rename, move or replace the contents of an existing Joomla media file or folder. Provide at least one of "new_path", "local_path", "source_url" or "content" '
+                . '(for a replacement file on this computer use "local_path" — never read or base64-encode it yourself).',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
                     'path' => ['type' => 'string', 'description' => 'Current file or folder path'],
                     'new_path' => ['type' => 'string', 'description' => 'New path to move or rename to'],
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => ['type' => 'string', 'description' => 'Replacement file contents as base64'],
                     'source_url' => ['type' => 'string', 'description' => 'URL the server will download and base64-encode as the replacement contents'],
                 ],
@@ -1085,17 +1106,25 @@ class ToolRegistry
         $this->register([
             'name' => 'install_extension',
             'description' => 'Install a Joomla extension from a zip package. '
-                . 'Provide exactly one of: `source_url` (preferred — server downloads the package), '
+                . 'Provide exactly one of: `local_path` (a .zip on this computer), `source_url` (server downloads the package), '
                 . '`source_path` (absolute path to a .zip already on the Joomla server), '
                 . 'or base64 `content` (small packages only). '
                 . 'Do not read local .zip files in the MCP client and pass them as content — MCP clients cannot read large binary files. '
+                . 'If local_path is refused because the client connects without the bundled bridge, POST it as the multipart/form-data field `file` to this MCP endpoint\'s URL with `task=rpc.upload` '
+                . 'in place of `task=rpc.handle`, sending the same Authorization header (e.g. `curl -H "Authorization: Bearer <token>" -F file=@package.zip "<url>"`), '
+                . 'then pass the `source_path` it returns. An uploaded package can be installed once and expires after an hour. '
                 . 'WARNING: this is arbitrary code execution — only allow trusted callers.',
             'inputSchema' => [
                 'type' => 'object',
                 'properties' => [
+                    'local_path' => [
+                        'type' => 'string',
+                        'x-mcp-local-file' => 'content',
+                        'description' => self::LOCAL_PATH_DESCRIPTION,
+                    ],
                     'content' => [
                         'type' => 'string',
-                        'description' => 'Base64-encoded contents of the .zip package (small packages only; prefer source_url or source_path)',
+                        'description' => 'Base64-encoded contents of the .zip package (small packages only; prefer local_path, source_url or source_path)',
                     ],
                     'source_url' => [
                         'type' => 'string',
@@ -1103,7 +1132,7 @@ class ToolRegistry
                     ],
                     'source_path' => [
                         'type' => 'string',
-                        'description' => 'Absolute path on the Joomla server to an existing .zip file (must be under tmp_path or the site root)',
+                        'description' => 'Absolute path on the Joomla server to an existing .zip file (must be under tmp_path or the site root), such as the source_path returned by task=rpc.upload',
                     ],
                 ],
             ],
@@ -2319,6 +2348,114 @@ class ToolRegistry
             ],
             'annotations' => [
                 'title' => 'Set Item Field Values',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'list_redirects',
+            'description' => 'List Joomla redirect links (com_redirect). Joomla\'s Web Services API returns enabled and disabled links only — archived and trashed links are not listed. With "Collect URLs" on in the System - Redirect plugin, Joomla also logs every 404 here as a disabled link with no destination; set unresolved to list just those. Filtering and sorting run over every link, so results are complete however many there are.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'search' => ['type' => 'string', 'description' => 'Case-insensitive text to find in the source URL, destination URL or comment'],
+                    'published' => ['type' => 'integer', 'enum' => [0, 1], 'description' => '1 = enabled only, 0 = disabled only'],
+                    'header' => ['type' => 'integer', 'description' => 'Only links with this HTTP status code (e.g. 301)'],
+                    'unresolved' => ['type' => 'boolean', 'description' => 'true = only links with no destination URL (typically collected 404s); false = only links with one'],
+                    'order_by' => ['type' => 'string', 'enum' => ['id', 'old_url', 'hits', 'created_date', 'modified_date'], 'default' => 'old_url', 'description' => 'Sort column; use hits with direction desc to find the most-requested broken URLs'],
+                    'direction' => ['type' => 'string', 'enum' => ['asc', 'desc'], 'default' => 'asc'],
+                    'limit' => ['type' => 'integer', 'description' => 'Results limit (use with offset to page; check pagination.has_more and pagination.next_offset in the response)'],
+                    'offset' => ['type' => 'integer', 'description' => 'Results offset (set to pagination.next_offset when pagination.has_more is true)'],
+                ],
+            ],
+            'annotations' => [
+                'title' => 'List Redirects',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'get_redirect',
+            'description' => 'Retrieve a Joomla redirect link by ID',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'Redirect link ID'],
+                ],
+                'required' => ['id'],
+            ],
+            'annotations' => [
+                'title' => 'Get Redirect',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'create_redirect',
+            'description' => 'Create a Joomla redirect link. Joomla only redirects requests that would otherwise return 404, so a source URL that still resolves to a page is never redirected. Links take effect only while the System - Redirect plugin is enabled, which it is not by default: check with list_extensions and enable it with set_extension_state. Each source URL may have only one link.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'old_url' => ['type' => 'string', 'description' => 'Source URL: a full URL (https://example.com/old-page) or a site-relative path (/old-page). Matched case-insensitively'],
+                    'new_url' => ['type' => 'string', 'description' => 'Destination URL: a full URL or a site-relative path. Required unless the Redirect component\'s Advanced Mode is on and header is a 4xx/5xx code'],
+                    'comment' => ['type' => 'string', 'description' => 'Admin note'],
+                    'published' => ['type' => 'integer', 'enum' => [0, 1, 2, -2], 'default' => 1, 'description' => '1 = enabled, 0 = disabled, 2 = archived, -2 = trashed'],
+                    'header' => ['type' => 'integer', 'default' => 301, 'description' => 'HTTP status code. Joomla always sends 301 unless the Redirect component\'s Advanced Mode is on, which allows other 3xx codes and 4xx/5xx codes such as 410 Gone'],
+                ],
+                'required' => ['old_url'],
+            ],
+            'annotations' => [
+                'title' => 'Create Redirect',
+                'readOnlyHint' => false,
+                'destructiveHint' => false,
+                'idempotentHint' => false,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'update_redirect',
+            'description' => 'Update a Joomla redirect link. Only the fields you send change. To fix a collected 404, set new_url and published = 1.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'Redirect link ID'],
+                    'old_url' => ['type' => 'string', 'description' => 'Source URL'],
+                    'new_url' => ['type' => 'string', 'description' => 'Destination URL'],
+                    'comment' => ['type' => 'string', 'description' => 'Admin note'],
+                    'published' => ['type' => 'integer', 'enum' => [0, 1, 2, -2], 'description' => '1 = enabled, 0 = disabled, 2 = archived, -2 = trashed'],
+                    'header' => ['type' => 'integer', 'description' => 'HTTP status code (honoured only in the Redirect component\'s Advanced Mode)'],
+                ],
+                'required' => ['id'],
+            ],
+            'annotations' => [
+                'title' => 'Update Redirect',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'delete_redirect',
+            'description' => 'Delete a Joomla redirect link. The link is trashed first when needed, then deleted permanently.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'id' => ['type' => 'integer', 'description' => 'Redirect link ID'],
+                ],
+                'required' => ['id'],
+            ],
+            'annotations' => [
+                'title' => 'Delete Redirect',
                 'readOnlyHint' => false,
                 'destructiveHint' => true,
                 'idempotentHint' => true,

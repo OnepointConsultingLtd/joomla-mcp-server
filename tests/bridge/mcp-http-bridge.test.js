@@ -9,12 +9,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
     encodeHeaderValue,
     buildMcpHeaders,
     parseSseMessages,
     paramHeadersFromTools,
+    localFileArgsFromTools,
+    inlineLocalFiles,
     createBridge,
 } = require('../../site/mcp-http-bridge.js');
 
@@ -328,6 +333,120 @@ test('an unknown schema is learned once on HeaderMismatch and the call retried',
             assert.equal(output.length, 1, 'only the retried call answers the client');
             assert.equal(output[0].id, 9, 'under the id the client used');
             assert.equal(output[0].result.ok, true);
+        }
+    );
+});
+
+const UPLOAD_TOOLS = [
+    {
+        name: 'upload_media',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                path: { type: 'string' },
+                local_path: { type: 'string', 'x-mcp-local-file': 'content' },
+                content: { type: 'string' },
+            },
+        },
+    },
+    { name: 'search_articles', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
+];
+
+function withTempFile(bytes, run) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-bridge-'));
+    const file = path.join(dir, 'logo.png');
+    fs.writeFileSync(file, bytes);
+    return Promise.resolve(run(file)).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+}
+
+test('local-file annotations become a per-tool map', () => {
+    const map = localFileArgsFromTools(UPLOAD_TOOLS);
+
+    assert.deepEqual(map.get('upload_media'), [['local_path', 'content']]);
+    assert.deepEqual(map.get('search_articles'), []);
+});
+
+test('a local file is read into its target argument as base64', async () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+    await withTempFile(bytes, async (file) => {
+        const args = await inlineLocalFiles({ path: 'banners/logo.png', local_path: file }, [['local_path', 'content']]);
+
+        assert.deepEqual(args, { path: 'banners/logo.png', content: bytes.toString('base64') });
+    });
+});
+
+test('a local file and inline content together are refused', async () => {
+    await assert.rejects(
+        inlineLocalFiles({ local_path: '/x.png', content: 'AAAA' }, [['local_path', 'content']]),
+        /either local_path or content/
+    );
+});
+
+test('a missing local file is reported with its resolved path', async () => {
+    await assert.rejects(
+        inlineLocalFiles({ local_path: '~/no-such-dir-mcp/x.png' }, [['local_path', 'content']]),
+        (error) => error.message.includes(path.join(os.homedir(), 'no-such-dir-mcp', 'x.png')) && error.message.includes('ENOENT')
+    );
+});
+
+test('tools/call sends the file content, not the path, once the schema is known', async () => {
+    const bytes = Buffer.from('fake video bytes');
+    await withTempFile(bytes, async (file) => {
+        await withBridge(
+            ({ body }, res) => json(res, 200, body.method === 'tools/list'
+                ? { jsonrpc: '2.0', id: body.id, result: { tools: UPLOAD_TOOLS } }
+                : { jsonrpc: '2.0', id: body.id, result: { content: [], ok: true } }),
+            async (bridge, output, received) => {
+                await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: MODERN_META } }));
+                await bridge.handleInput(JSON.stringify({
+                    jsonrpc: '2.0', id: 2, method: 'tools/call',
+                    params: { name: 'upload_media', arguments: { path: 'videos/clip.mp4', local_path: file }, _meta: MODERN_META },
+                }));
+
+                assert.deepEqual(received[1].body.params.arguments, { path: 'videos/clip.mp4', content: bytes.toString('base64') });
+                assert.equal(output[1].id, 2);
+                assert.equal(output[1].result.ok, true);
+            }
+        );
+    });
+});
+
+test('a local_path call before tools/list learns the schema first', async () => {
+    await withTempFile(Buffer.from('x'), async (file) => {
+        await withBridge(
+            ({ body }, res) => json(res, 200, body.method === 'tools/list'
+                ? { jsonrpc: '2.0', id: body.id, result: { tools: UPLOAD_TOOLS } }
+                : { jsonrpc: '2.0', id: body.id, result: { content: [] } }),
+            async (bridge, output, received) => {
+                await bridge.handleInput(JSON.stringify({
+                    jsonrpc: '2.0', id: 4, method: 'tools/call',
+                    params: { name: 'upload_media', arguments: { path: 'a.png', local_path: file }, _meta: MODERN_META },
+                }));
+
+                assert.deepEqual(received.map((entry) => entry.body.method), ['tools/list', 'tools/call']);
+                assert.equal(received[1].body.params.arguments.content, Buffer.from('x').toString('base64'));
+                assert.equal(received[1].body.params.arguments.local_path, undefined);
+                assert.equal(output.length, 1);
+                assert.equal(output[0].id, 4);
+            }
+        );
+    });
+});
+
+test('an unreadable local file becomes an isError result and nothing is sent', async () => {
+    await withBridge(
+        ({ body }, res) => json(res, 200, { jsonrpc: '2.0', id: body.id, result: { tools: UPLOAD_TOOLS } }),
+        async (bridge, output, received) => {
+            await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: MODERN_META } }));
+            await bridge.handleInput(JSON.stringify({
+                jsonrpc: '2.0', id: 2, method: 'tools/call',
+                params: { name: 'upload_media', arguments: { path: 'a.png', local_path: '/no/such/file.png' }, _meta: MODERN_META },
+            }));
+
+            assert.equal(received.length, 1, 'only the tools/list reached the server');
+            assert.equal(output[1].id, 2);
+            assert.equal(output[1].result.isError, true);
+            assert.match(output[1].result.content[0].text, /cannot read .*file\.png/);
         }
     );
 });

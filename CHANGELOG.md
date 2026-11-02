@@ -2,6 +2,15 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## 1.11.0 - 2026-11-02
+
+- Added five redirect management tools (`list_redirects`, `get_redirect`, `create_redirect`, `update_redirect`, `delete_redirect`) covering `com_redirect`, including filtering and sorting across all redirect links (such as unresolved 404s sorted by hits) and automatic trashing before permanent deletion.
+- Added `local_path` to `upload_media`, `update_media` and `install_extension`: when connected through the bundled bridge, the bridge reads the file from the client's disk and sends it as base64 `content` without the file's bytes passing through the model.
+- Added a `POST` `task=rpc.upload` endpoint that stages a multipart `file` upload in `tmp_path` and returns a single-use `source_path` for `install_extension`.
+- Fixed the media tools (`list_media`, `get_media`, `upload_media`, `update_media`, `delete_media`) only seeing and accepting images: they now pass every configured `com_media` media type (`mediatypes`), so audio, video and document files (such as PDFs and MP4s) can be listed, uploaded, replaced and deleted.
+- Fixed prefix-based cache invalidation (`JoomlaCache::deleteByPrefix()`) never removing cached entries.
+- Requests whose body is discarded by PHP because `Content-Length` exceeds `post_max_size` now return HTTP 413 with a clear message naming `post_max_size` instead of a misleading JSON parse error.
+
 ## 1.10.2 - 2026-10-21
 
 - Fixed every Governed Mode credential being refused with "Invalid or expired MCP credential" (`-32001`) (#41).

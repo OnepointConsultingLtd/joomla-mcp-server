@@ -117,6 +117,7 @@ final class PrincipalCache implements CacheInterface
      * Forwarded so CacheService::deleteByPrefix (which detects this method
      * via method_exists) keeps prefix-based invalidation scoped to the
      * current principal instead of clearing every user's cache entries.
+     * (JoomlaCache cannot match prefixes and cleans its whole group anyway.)
      */
     public function deleteByPrefix(string $prefix): void
     {

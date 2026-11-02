@@ -121,6 +121,11 @@ final class ToolAccessPolicy
         'reorder_fields' => ['kind' => self::API, 'component' => null, 'action' => null],
         'get_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
         'set_item_field_values' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'list_redirects' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'get_redirect' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'create_redirect' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'update_redirect' => ['kind' => self::API, 'component' => null, 'action' => null],
+        'delete_redirect' => ['kind' => self::API, 'component' => null, 'action' => null],
     ];
 
     /** @return list<string> */

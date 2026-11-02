@@ -1,0 +1,5 @@
+-- 1.11.0 adds the com_redirect tool family, local_path file uploads, the
+-- task=rpc.upload staging endpoint and cache invalidation fixes, so there is no
+-- schema change.
+-- The file exists because Joomla applies update SQL by version filename: without it
+-- the 1.11.0 step is missing from the upgrade sequence.

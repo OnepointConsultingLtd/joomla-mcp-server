@@ -113,17 +113,19 @@ class JoomlaCache implements CacheInterface
         return (bool) $this->cache->gc();
     }
 
+    /**
+     * Joomla's cache cannot delete by key prefix: storages persist entries under
+     * md5-hashed ids, and Cache::getAll() returns per-group stats keyed by group
+     * name, never entry keys. Matching a prefix against getAll() therefore never
+     * removed anything, leaving every prefix-invalidated read stale until its TTL
+     * ran out (e.g. set_article_associations echoing the pre-write state).
+     *
+     * Clean the whole group instead. It over-invalidates, but the group holds
+     * only this component's read cache, so the cost is a few extra cache misses.
+     */
     public function deleteByPrefix(string $prefix): void
     {
-        $cachedKeys = $this->cache->getAll();
-
-        if (is_array($cachedKeys)) {
-            foreach ($cachedKeys as $key => $value) {
-                if (str_starts_with($key, $prefix)) {
-                    $this->cache->remove($key);
-                }
-            }
-        }
+        $this->clear();
     }
 }
 

@@ -255,6 +255,11 @@ class RpcService
             'reorder_fields'                => fn(array $p) => $this->reorderFields($p),
             'get_item_field_values'         => fn(array $p) => $this->getItemFieldValues($p),
             'set_item_field_values'         => fn(array $p) => $this->setItemFieldValues($p),
+            'list_redirects'                => fn(array $p) => $this->listRedirects($p),
+            'get_redirect'                  => fn(array $p) => $this->getRedirect($p),
+            'create_redirect'               => fn(array $p) => $this->createRedirect($p),
+            'update_redirect'               => fn(array $p) => $this->updateRedirect($p),
+            'delete_redirect'               => fn(array $p) => $this->deleteRedirect($p),
         ];
 
         foreach ($executors as $name => $executor) {
@@ -2692,9 +2697,45 @@ class RpcService
         return $result;
     }
 
+    /**
+     * Media type code → the com_media option listing its extensions, and the
+     * default Joomla's media ApiModel falls back to when the option is unset.
+     */
+    private const MEDIA_TYPE_EXTENSION_OPTIONS = [
+        '0' => ['image_extensions', 'bmp,gif,jpg,jpeg,png,webp'],
+        '1' => ['audio_extensions', 'mp3,m4a,mp4a,ogg'],
+        '2' => ['video_extensions', 'mp4,mp4v,mpeg,mov,webm'],
+        '3' => ['doc_extensions', 'doc,odg,odp,ods,odt,pdf,ppt,txt,xcf,xls,csv'],
+    ];
+
+    private ?string $mediaTypes = null;
+
+    /**
+     * The "mediatypes" value for Joomla's media API: every type with extensions
+     * configured in the Media options. The API accepts only the types it is
+     * given and assumes images only when there is none, so listing would hide
+     * videos and PDFs and every other call would refuse them as "File type not
+     * allowed". Which extensions each type covers stays Joomla's decision.
+     */
+    private function mediaTypes(): string
+    {
+        if ($this->mediaTypes === null) {
+            $params = \Joomla\CMS\Component\ComponentHelper::getParams('com_media');
+            $types = [];
+            foreach (self::MEDIA_TYPE_EXTENSION_OPTIONS as $code => [$option, $default]) {
+                if (trim((string) $params->get($option, $default), " ,") !== '') {
+                    $types[] = (string) $code;
+                }
+            }
+            $this->mediaTypes = implode(',', $types);
+        }
+
+        return $this->mediaTypes;
+    }
+
     private function listMedia(array $params): array
     {
-        $query = [];
+        $query = ['mediatypes' => $this->mediaTypes()];
         if (isset($params['path']) && $params['path'] !== '') {
             $query['path'] = (string) $params['path'];
         }
@@ -2724,7 +2765,7 @@ class RpcService
             throw new \InvalidArgumentException('path is required');
         }
 
-        $query = [];
+        $query = ['mediatypes' => $this->mediaTypes()];
         if (($params['include_url'] ?? true)) {
             $query['url'] = 1;
         }
@@ -2747,10 +2788,10 @@ class RpcService
 
         $content = $this->resolveMediaContent($params);
         if ($content === null) {
-            throw new \InvalidArgumentException('Either content or source_url is required');
+            throw new \InvalidArgumentException('One of local_path, source_url or content is required');
         }
 
-        $result = $this->rest->post('api/index.php/v1/media/files', [
+        $result = $this->rest->post('api/index.php/v1/media/files?mediatypes=' . $this->mediaTypes(), [
             'path' => $path,
             'content' => $content,
         ]);
@@ -2790,10 +2831,13 @@ class RpcService
         }
 
         if (empty($payload)) {
-            throw new \InvalidArgumentException('Provide at least one of new_path, content or source_url');
+            throw new \InvalidArgumentException('Provide at least one of new_path, local_path, source_url or content');
         }
 
-        $result = $this->rest->patch('api/index.php/v1/media/files/' . $this->mediaItemPath($path), $payload);
+        $result = $this->rest->patch(
+            'api/index.php/v1/media/files/' . $this->mediaItemPath($path) . '?mediatypes=' . $this->mediaTypes(),
+            $payload
+        );
         $this->cache->deleteByPrefix('media_');
         return $this->withoutEchoedMediaContent($result);
     }
@@ -2805,6 +2849,22 @@ class RpcService
      * which MCP clients truncate or reject; the agent then reports a failed upload and retries
      * into "File exists" although the first call succeeded.
      */
+    /**
+     * local_path names a file on the client's machine, which the bundled bridge
+     * swaps for "content" before the call is sent. Reaching the server means the
+     * client connects without the bridge, and the path means nothing here.
+     */
+    private function assertNoUnresolvedLocalPath(array $params): void
+    {
+        if (isset($params['local_path']) && $params['local_path'] !== '') {
+            throw new \InvalidArgumentException(
+                'local_path is read by the bundled MCP bridge (mcp-http-bridge.js or the Claude Desktop extension), '
+                . 'and this client is not connected through it. Use source_url, or base64 content for small files, '
+                . 'or connect the client through the bridge.'
+            );
+        }
+    }
+
     private function withoutEchoedMediaContent(array $result): array
     {
         unset($result['data']['attributes']['content']);
@@ -2819,13 +2879,15 @@ class RpcService
             throw new \InvalidArgumentException('path is required');
         }
 
-        $result = $this->rest->delete('api/index.php/v1/media/files/' . $this->mediaItemPath($path));
+        $result = $this->rest->delete('api/index.php/v1/media/files/' . $this->mediaItemPath($path) . '?mediatypes=' . $this->mediaTypes());
         $this->cache->deleteByPrefix('media_');
         return $result;
     }
 
     private function resolveMediaContent(array $params): ?string
     {
+        $this->assertNoUnresolvedLocalPath($params);
+
         $hasContent = isset($params['content']) && $params['content'] !== '';
         $hasUrl = isset($params['source_url']) && $params['source_url'] !== '';
 
@@ -2908,6 +2970,10 @@ class RpcService
     private const CATEGORIES_PATH = 'api/index.php/v1/content/categories';
     private const TAGS_PATH = 'api/index.php/v1/tags';
     private const CONTACTS_PATH = 'api/index.php/v1/contacts';
+    private const REDIRECTS_PATH = 'api/index.php/v1/redirects';
+    private const REDIRECT_STRING_COLUMNS = ['old_url', 'new_url', 'comment'];
+    private const REDIRECT_INT_COLUMNS = ['published', 'header'];
+    private const REDIRECT_ORDER_COLUMNS = ['id', 'old_url', 'hits', 'created_date', 'modified_date'];
     private const CONTACT_OPTIONAL_FIELDS = [
         'alias', 'con_position', 'email_to', 'telephone', 'mobile', 'fax', 'webpage', 'address',
         'suburb', 'state', 'postcode', 'country', 'misc', 'image', 'metadesc', 'note',
@@ -3613,6 +3679,8 @@ class RpcService
 
     private function resolveExtensionPackageBytes(array $params): string
     {
+        $this->assertNoUnresolvedLocalPath($params);
+
         $hasContent = isset($params['content']) && $params['content'] !== '';
         $hasUrl     = isset($params['source_url']) && $params['source_url'] !== '';
         $hasPath    = isset($params['source_path']) && $params['source_path'] !== '';
@@ -3685,6 +3753,9 @@ class RpcService
         if ($bytes === false) {
             throw new \RuntimeException('Failed to read source_path');
         }
+
+        // A package staged by task=rpc.upload is single-use.
+        (new PackageUploadService((string) Factory::getApplication()->get('tmp_path')))->consume($real);
 
         return $bytes;
     }
@@ -4846,7 +4917,7 @@ class RpcService
         if (count($allIds) === 1) {
             // Caller wants to clear associations; just remove rows for the primary.
             $this->deleteAssociationsForIds($context, $allIds);
-            $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+            $this->invalidateAssociationCaches($context);
             return $this->loadAssociations($context, $primaryId);
         }
 
@@ -4889,8 +4960,22 @@ class RpcService
             $db->insertObject('#__associations', $row);
         }
 
-        $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+        $this->invalidateAssociationCaches($context);
         return $this->loadAssociations($context, $primaryId);
+    }
+
+    /**
+     * Joomla's article and menu item API output embeds each item's associations, so the
+     * cached single-item reads go stale alongside the association lists.
+     */
+    private function invalidateAssociationCaches(string $context): void
+    {
+        $this->cache->deleteByPrefix($this->associationCachePrefix($context));
+        if ($context === self::ASSOC_CONTEXT_ARTICLE) {
+            $this->cache->deleteByPrefix('article:');
+        } elseif ($context === self::ASSOC_CONTEXT_MENU_ITEM) {
+            $this->cache->deleteByPrefix('menu_item:');
+        }
     }
 
     private function loadItemsForAssociation(string $context, array $ids): array
@@ -5132,6 +5217,149 @@ class RpcService
         $this->cache->delete('tag:' . $id);
         $this->cache->deleteByPrefix('tags_list:');
         return $result;
+    }
+
+    private function listRedirects(array $params): array
+    {
+        // Joomla's redirect API builds its list model with ignore_request, so filter[] and
+        // list[] parameters are silently dropped. Fetch every page once and filter and sort here.
+        $links = $this->cache->remember('redirects_list:all', fn () => $this->withRedirectRoute(
+            fn () => $this->fetchAllPages(self::REDIRECTS_PATH)
+        ));
+        $limitReached = count($links) >= self::FETCH_ALL_PAGES_CAP;
+
+        $search = trim((string) ($params['search'] ?? ''));
+        $links = array_values(array_filter($links, static function ($link) use ($params, $search): bool {
+            $attributes = is_array($link['attributes'] ?? null) ? $link['attributes'] : [];
+            $newUrl = trim((string) ($attributes['new_url'] ?? ''));
+
+            if ($search !== '') {
+                $haystack = (string) ($attributes['old_url'] ?? '') . "\n" . $newUrl . "\n" . (string) ($attributes['comment'] ?? '');
+                if (mb_stripos($haystack, $search) === false) {
+                    return false;
+                }
+            }
+
+            if (isset($params['published']) && (int) ($attributes['published'] ?? 0) !== (int) $params['published']) {
+                return false;
+            }
+
+            if (isset($params['header']) && (int) ($attributes['header'] ?? 0) !== (int) $params['header']) {
+                return false;
+            }
+
+            return !isset($params['unresolved']) || ($newUrl === '') === (bool) $params['unresolved'];
+        }));
+
+        $orderBy = in_array($params['order_by'] ?? null, self::REDIRECT_ORDER_COLUMNS, true) ? $params['order_by'] : 'old_url';
+        $descending = ($params['direction'] ?? 'asc') === 'desc';
+        usort($links, static function ($a, $b) use ($orderBy, $descending): int {
+            $left = $a['attributes'][$orderBy] ?? null;
+            $right = $b['attributes'][$orderBy] ?? null;
+            $cmp = in_array($orderBy, ['id', 'hits'], true)
+                ? (int) $left <=> (int) $right
+                : strcasecmp((string) $left, (string) $right);
+
+            return $descending ? -$cmp : $cmp;
+        });
+
+        $response = ['data' => $links];
+        if ($limitReached) {
+            $response['links_limit_reached'] = true;
+        }
+
+        return $this->withPaginationMetadata($response, $params);
+    }
+
+    private function getRedirect(array $params): array
+    {
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) {
+            throw new \InvalidArgumentException('id is required');
+        }
+
+        return $this->cache->remember('redirect:' . $id, fn () => $this->rest->get(self::REDIRECTS_PATH . '/' . $id));
+    }
+
+    private function createRedirect(array $params): array
+    {
+        $oldUrl = trim((string) ($params['old_url'] ?? ''));
+        if ($oldUrl === '') {
+            throw new \InvalidArgumentException('old_url is required');
+        }
+
+        // new_url is nullable and only optional in Advanced Mode, so it is sent only when given
+        // and LinkTable::check() reports a missing destination in Joomla's own words.
+        $payload = array_merge(
+            ['published' => 1, 'header' => 301],
+            $this->buildFieldPayload($params, self::REDIRECT_STRING_COLUMNS, self::REDIRECT_INT_COLUMNS),
+            ['old_url' => $oldUrl]
+        );
+
+        $result = $this->withRedirectRoute(fn () => $this->rest->post(self::REDIRECTS_PATH, $payload));
+        $this->cache->deleteByPrefix('redirects_list:');
+        return $result;
+    }
+
+    private function updateRedirect(array $params): array
+    {
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) {
+            throw new \InvalidArgumentException('id is required');
+        }
+
+        $this->requireFieldUpdates($params, array_merge(self::REDIRECT_STRING_COLUMNS, self::REDIRECT_INT_COLUMNS));
+
+        // Joomla's PATCH handler backfills every #__redirect_links column the body omits, so a
+        // partial payload is safe here.
+        $result = $this->rest->patch(
+            self::REDIRECTS_PATH . '/' . $id,
+            $this->buildFieldPayload($params, self::REDIRECT_STRING_COLUMNS, self::REDIRECT_INT_COLUMNS)
+        );
+        $this->cache->delete('redirect:' . $id);
+        $this->cache->deleteByPrefix('redirects_list:');
+        return $result;
+    }
+
+    private function deleteRedirect(array $params): array
+    {
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) {
+            throw new \InvalidArgumentException('id is required');
+        }
+
+        // LinkModel::canDelete refuses any link that is not trashed (published -2).
+        $current = $this->rest->get(self::REDIRECTS_PATH . '/' . $id);
+        if ((int) ($current['data']['attributes']['published'] ?? 0) !== -2) {
+            $this->rest->patch(self::REDIRECTS_PATH . '/' . $id, ['published' => -2]);
+        }
+
+        $result = $this->rest->delete(self::REDIRECTS_PATH . '/' . $id);
+        $this->cache->delete('redirect:' . $id);
+        $this->cache->deleteByPrefix('redirects_list:');
+        return $result;
+    }
+
+    /**
+     * A 404 on the redirects collection cannot mean "record missing", so the route itself is
+     * absent: core registers it from plg_webservices_redirect.
+     */
+    private function withRedirectRoute(callable $call): mixed
+    {
+        try {
+            return $call();
+        } catch (RequestException $e) {
+            if ($e->hasResponse() && $e->getResponse()->getStatusCode() === 404) {
+                throw new \RuntimeException(
+                    'The Joomla Web Services API has no redirects route. Core registers it from the '
+                    . 'plg_webservices_redirect plugin, so enable "Web Services - Redirect" in the Joomla plugin manager.',
+                    0,
+                    $e
+                );
+            }
+
+            throw $e;
+        }
     }
 
     private function createContact(array $params): array

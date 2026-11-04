@@ -348,6 +348,34 @@ namespace Joomla\Component\Mcpserver\Tests\Stubs {
 
             return $this;
         }
+
+        public function order(string $columns): self
+        {
+            $this->clauses[] = 'order ' . $columns;
+
+            return $this;
+        }
+
+        public function update(string $table): self
+        {
+            $this->clauses[] = 'update ' . $table;
+
+            return $this;
+        }
+
+        public function set(string $value): self
+        {
+            $this->clauses[] = 'set ' . $value;
+
+            return $this;
+        }
+
+        public function delete(string $table): self
+        {
+            $this->clauses[] = 'delete ' . $table;
+
+            return $this;
+        }
     }
 
     /**
@@ -416,12 +444,19 @@ namespace Joomla\Component\Mcpserver\Tests\Stubs {
 
     /**
      * Minimal stand-in for Joomla's DatabaseDriver. Tests queue the rows that
-     * loadObject() should hand back, in call order.
+     * loadObject() and the row lists that loadObjectList() should hand back, in
+     * call order; execute() records the queries it runs.
      */
     class StubDatabase
     {
         /** @var list<object|null> */
         public array $objects = [];
+
+        /** @var list<list<object>> */
+        public array $objectLists = [];
+
+        /** @var list<StubQuery> */
+        public array $executed = [];
 
         public ?StubQuery $lastQuery = null;
 
@@ -454,6 +489,21 @@ namespace Joomla\Component\Mcpserver\Tests\Stubs {
         public function loadObject(): ?object
         {
             return array_shift($this->objects);
+        }
+
+        /** @return list<object> */
+        public function loadObjectList(): array
+        {
+            return array_shift($this->objectLists) ?? [];
+        }
+
+        public function execute(): bool
+        {
+            if ($this->lastQuery !== null) {
+                $this->executed[] = $this->lastQuery;
+            }
+
+            return true;
         }
     }
 }

@@ -211,6 +211,9 @@ class RpcService
             'get_template_file'             => fn(array $p) => $this->getTemplateFile($p),
             'update_template_file'          => fn(array $p) => $this->updateTemplateFile($p),
             'create_template_override'      => fn(array $p) => $this->createTemplateOverride($p),
+            'list_template_updated_files'   => fn(array $p) => $this->listTemplateUpdatedFiles($p),
+            'diff_template_override'        => fn(array $p) => $this->diffTemplateOverride($p),
+            'manage_template_updated_files' => fn(array $p) => $this->manageTemplateUpdatedFiles($p),
             'list_article_associations'     => fn(array $p) => $this->listArticleAssociations($p),
             'set_article_associations'      => fn(array $p) => $this->setArticleAssociations($p),
             'list_menu_item_associations'   => fn(array $p) => $this->listMenuItemAssociations($p),
@@ -3423,6 +3426,206 @@ class RpcService
             'source'       => $source,
             'created'      => true,
         ];
+    }
+
+    private function listTemplateUpdatedFiles(array $params): array
+    {
+        $template      = $this->resolveTemplate((int) ($params['extension_id'] ?? 0));
+        $uncheckedOnly = (bool) ($params['unchecked_only'] ?? false);
+        $base          = $this->templateBasePath($template, false);
+
+        $files = [];
+        foreach ($this->loadTemplateOverrideRecords($template, $uncheckedOnly) as $path => $row) {
+            // Joomla's Updated Files tab hides records whose override has since been deleted.
+            if (!is_file($base . '/' . $path)) {
+                continue;
+            }
+
+            $state   = (int) $row->state;
+            $files[] = [
+                'path'          => $path,
+                'checked'       => $state === 1,
+                'action'        => (string) $row->action,
+                'created_date'  => $row->created_date,
+                'modified_date' => $row->modified_date,
+            ];
+        }
+
+        return $this->withPaginationMetadata([
+            'extension_id' => $template->extension_id,
+            'template'     => $template->element,
+            'client'       => $template->client_id === 0 ? 'site' : 'administrator',
+            'files'        => $files,
+        ], $params, 'files');
+    }
+
+    private function diffTemplateOverride(array $params): array
+    {
+        $template = $this->resolveTemplate((int) ($params['extension_id'] ?? 0));
+        $relative = $this->normaliseOverridePath((string) ($params['path'] ?? ''));
+
+        if (!str_starts_with($relative, 'html/')) {
+            throw new \InvalidArgumentException('Only overrides under html/ have a core file to compare with');
+        }
+
+        $path = $this->safeTemplatePath($this->templateBasePath($template, false), $relative);
+
+        if (!is_file($path)) {
+            throw new \InvalidArgumentException('File not found: ' . $relative);
+        }
+
+        if (!$this->templateExtensionAllowed($path)) {
+            throw new \InvalidArgumentException('File type is not editable: ' . $relative);
+        }
+
+        // Joomla's own resolver, so component views (both tmpl/ schemes), modules,
+        // JLayouts and date-suffixed override copies map exactly as the editor maps them.
+        $coreFile = $this->bootTemplateModel($template->extension_id)
+            ->getCoreFile('/' . $relative, $template->client_id);
+
+        if (!\is_string($coreFile) || $coreFile === '' || !is_file($coreFile)) {
+            throw new \InvalidArgumentException('No core file found for override: ' . $relative);
+        }
+
+        $coreSource     = (string) file_get_contents($coreFile);
+        $overrideSource = (string) file_get_contents($path);
+        $diff           = TextDiff::unifiedDiff($coreSource, $overrideSource);
+        $root           = rtrim(str_replace('\\', '/', JPATH_ROOT), '/') . '/';
+        $coreRelative   = str_replace('\\', '/', $coreFile);
+
+        $result = [
+            'extension_id' => $template->extension_id,
+            'template'     => $template->element,
+            'path'         => $relative,
+            'core_file'    => str_starts_with($coreRelative, $root) ? substr($coreRelative, \strlen($root)) : $coreRelative,
+            'identical'    => $diff === '',
+            'diff'         => $diff,
+        ];
+
+        if ($diff === null) {
+            $result['diff_unavailable'] = 'Files are too large to diff; set include_sources to compare them directly';
+        }
+
+        if ((bool) ($params['include_sources'] ?? false)) {
+            $result['core_source']     = $coreSource;
+            $result['override_source'] = $overrideSource;
+        }
+
+        return $result;
+    }
+
+    private function manageTemplateUpdatedFiles(array $params): array
+    {
+        $template = $this->resolveTemplate((int) ($params['extension_id'] ?? 0));
+        $action   = (string) ($params['action'] ?? '');
+        $states   = ['mark_checked' => 1, 'mark_unchecked' => 0, 'remove_record' => null];
+
+        if (!\array_key_exists($action, $states)) {
+            throw new \InvalidArgumentException('action must be one of: mark_checked, mark_unchecked, remove_record');
+        }
+
+        $paths = array_values(array_unique(array_map(
+            fn ($path): string => $this->normaliseOverridePath((string) $path),
+            (array) ($params['paths'] ?? [])
+        )));
+
+        if ($paths === []) {
+            throw new \InvalidArgumentException('paths is required');
+        }
+
+        $records  = $this->loadTemplateOverrideRecords($template, false);
+        $matched  = [];
+        $notFound = [];
+
+        foreach ($paths as $path) {
+            if (isset($records[$path])) {
+                $matched[$path] = (string) $records[$path]->hash_id;
+            } else {
+                $notFound[] = $path;
+            }
+        }
+
+        if ($matched !== []) {
+            $db    = Factory::getDbo();
+            $query = $db->getQuery(true);
+
+            // Same statements as TemplateModel::publish(), batched: match the stored
+            // hash_id verbatim and scope it to this template's extension_id.
+            if ($states[$action] === null) {
+                $query->delete($db->quoteName('#__template_overrides'));
+            } else {
+                $query->update($db->quoteName('#__template_overrides'))
+                    ->set($db->quoteName('state') . ' = ' . $states[$action]);
+            }
+
+            $query->where($db->quoteName('extension_id') . ' = ' . $template->extension_id)
+                ->where($db->quoteName('hash_id') . ' IN (' . implode(',', array_map([$db, 'quote'], $matched)) . ')');
+
+            $db->setQuery($query)->execute();
+        }
+
+        return [
+            'extension_id' => $template->extension_id,
+            'template'     => $template->element,
+            'action'       => $action,
+            'updated'      => array_keys($matched),
+            'not_found'    => $notFound,
+        ];
+    }
+
+    /**
+     * Updated-files records (#__template_overrides) for a template, keyed by the
+     * override path relative to the template root. Joomla stores that path as
+     * base64 in hash_id with a leading separator: base64('/html/com_x/view/file.php').
+     *
+     * @return array<string, object>
+     */
+    private function loadTemplateOverrideRecords(object $template, bool $uncheckedOnly): array
+    {
+        $db    = Factory::getDbo();
+        $query = $db->getQuery(true)
+            ->select($db->quoteName(['hash_id', 'state', 'action', 'created_date', 'modified_date']))
+            ->from($db->quoteName('#__template_overrides'))
+            ->where($db->quoteName('extension_id') . ' = ' . $template->extension_id)
+            ->order($db->quoteName('modified_date') . ' DESC');
+
+        if ($uncheckedOnly) {
+            $query->where($db->quoteName('state') . ' = 0');
+        }
+
+        $records = [];
+        foreach ($db->setQuery($query)->loadObjectList() ?: [] as $row) {
+            $decoded = base64_decode((string) $row->hash_id, true);
+
+            if (!\is_string($decoded) || $decoded === '') {
+                continue;
+            }
+
+            try {
+                $path = $this->normaliseOverridePath($decoded);
+            } catch (\InvalidArgumentException) {
+                continue;
+            }
+
+            $records[$path] ??= $row;
+        }
+
+        return $records;
+    }
+
+    /**
+     * Normalise a template-relative path to the form the file tools use
+     * ("html/com_content/article/default.php"), refusing traversal.
+     */
+    private function normaliseOverridePath(string $path): string
+    {
+        $path = trim(str_replace('\\', '/', $path), " \t\n\r\0\x0B/");
+
+        if ($path === '' || str_contains($path, '..') || str_contains($path, "\0")) {
+            throw new \InvalidArgumentException('Invalid path: ' . $path);
+        }
+
+        return $path;
     }
 
     /**

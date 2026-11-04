@@ -2,6 +2,10 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## Unreleased
+
+- Added template "Updated Files" tools, matching the tab of that name in Joomla's template manager: `list_template_updated_files` lists overrides whose core file was changed by a Joomla or extension update, `diff_template_override` shows a unified diff from the core file to the override, and `manage_template_updated_files` applies "Mark Checked", "Mark Unchecked" or "Remove Record" to one or more of them. All three require `core.admin` in Governed Mode.
+
 ## 1.11.0 - 2026-11-02
 
 - Added five redirect management tools (`list_redirects`, `get_redirect`, `create_redirect`, `update_redirect`, `delete_redirect`) covering `com_redirect`, including filtering and sorting across all redirect links (such as unresolved 404s sorted by hits) and automatic trashing before permanent deletion.

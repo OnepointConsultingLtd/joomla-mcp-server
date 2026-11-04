@@ -20,7 +20,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 95 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 98 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -167,6 +167,9 @@ To upload a file from the client's computer, pass its path as `local_path`, e.g.
 | `get_template_file` | Read the source of a single template file |
 | `update_template_file` | Write the source of a template file, creating it if its parent directory exists |
 | `create_template_override` | Create a template override by copying a core view, module, plugin or layout into the template |
+| `list_template_updated_files` | List the template's "Updated Files": overrides whose core file changed in a Joomla or extension update |
+| `diff_template_override` | Show a unified diff from the core file to the template override (optionally with both full sources) |
+| `manage_template_updated_files` | Mark Updated Files records checked or unchecked, or remove the records (override files are untouched) |
 
 ### Extensions
 

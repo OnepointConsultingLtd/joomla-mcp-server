@@ -9,6 +9,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const https = require('node:https');
+const EventEmitter = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -215,6 +217,86 @@ test('an HTTP error without a JSON body becomes a JSON-RPC error for the request
             assert.match(output[0].error.message, /HTTP Error 502/);
         }
     );
+});
+
+/**
+ * Stand in for http.request with a request whose socket never connects, as
+ * when a firewall silently drops the packets.
+ */
+async function withUnreachableHost(run) {
+    const originals = [http.request, https.request];
+    const sockets = [];
+    http.request = https.request = () => {
+        const req = new EventEmitter();
+        const socket = new EventEmitter();
+        socket.connecting = true;
+        sockets.push(socket);
+        req.write = () => {};
+        req.end = () => setImmediate(() => req.emit('socket', socket));
+        req.destroy = (error) => { req.emit('error', error); req.emit('close'); };
+        return req;
+    };
+    try {
+        await run(sockets);
+    } finally {
+        [http.request, https.request] = originals;
+    }
+}
+
+test('a host that never accepts the connection fails fast with the cause', async () => {
+    await withUnreachableHost(async () => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'http://unreachable.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'initialize', params: { protocolVersion: '2025-11-25' } }));
+
+        assert.equal(output.length, 1);
+        assert.equal(output[0].id, 9);
+        assert.equal(output[0].error.message, 'Could not connect to unreachable.test within 0.02s');
+    });
+});
+
+test('the connect timeout stops once the connection is made', async () => {
+    await withUnreachableHost(async (sockets) => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'http://slow.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/list', params: {} }));
+        await new Promise((resolve) => setImmediate(resolve));
+        sockets[0].emit('connect');
+        await new Promise((resolve) => setTimeout(resolve, 60));
+
+        // Connected but still waiting on the server: a slow reply is not an error.
+        assert.deepEqual(output, []);
+    });
+});
+
+test('over https the connect timeout also covers the TLS handshake', async () => {
+    await withUnreachableHost(async (sockets) => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'https://stalled-tls.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        const pending = bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'initialize', params: { protocolVersion: '2025-11-25' } }));
+        await new Promise((resolve) => setImmediate(resolve));
+        // TCP connected, but the TLS handshake never completes.
+        sockets[0].emit('connect');
+        await pending;
+
+        assert.equal(output.length, 1);
+        assert.equal(output[0].error.message, 'Could not connect to stalled-tls.test within 0.02s');
+    });
 });
 
 test('a request whose reply carries no response gets an error instead of hanging', async () => {

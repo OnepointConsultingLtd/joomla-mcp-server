@@ -471,7 +471,7 @@ Not implemented, all optional in the specification: OAuth authorization (clients
 
 For Claude Desktop the easiest client setup is the bundled extension: a `.mcpb` file (a zip in the [MCPB](https://github.com/modelcontextprotocol/mcpb) format) that installs with a double-click. It contains the component's own zero-dependency HTTP bridge, so there is no Node.js install, no npm package and no hand-edited JSON — Claude Desktop supplies the Node runtime itself, and the connector appears as *MCP Server for Joomla* with the project logo.
 
-**Download it from your own site (recommended).** In **Administrator → Components → MCP Server**, click **Download Claude Desktop extension** in the MCP Client Configuration card. The component generates a personalised bundle on the fly: the endpoint URL is pre-filled and the connector is named after the site, which keeps several Joomla sites clearly distinguishable in Claude Desktop.
+**Download it from your own site (recommended).** In **Administrator → Components → MCP Server**, click **Download Claude Desktop extension** in the MCP Client Configuration card. The component generates a personalised bundle on the fly: the endpoint URL is pre-filled and the connector is named after the site. Each site's bundle also gets its own extension name, derived from the site's URL, so several Joomla sites can be installed side by side in Claude Desktop. Bundles downloaded from 1.11.0 or earlier all shared one extension name, so installing one replaced another and lost its bearer token; download each site's bundle again to install them side by side.
 
 **Or download the generic bundle.** Every GitHub release also publishes `com_mcpserver.mcpb` alongside the component zip.
 
@@ -545,7 +545,7 @@ Claude Desktop on Windows spawns MCP servers with a truncated PATH that excludes
 
 Fully quit Claude Desktop from the tray after editing the configuration — closing the window is not enough.
 
-The bearer token can also be supplied through `HTTP_AUTH_BEARER`. Set `MCP_IGNORE_SSL=1` only for local development with self-signed certificates.
+The bearer token can also be supplied through `HTTP_AUTH_BEARER`. Set `MCP_IGNORE_SSL=1` only for local development with self-signed certificates. If the site cannot be reached, the bridge gives up after 15 seconds of trying to connect (DNS, TCP and the TLS handshake) and reports the cause (e.g. `Could not connect to example.com within 15s`) instead of leaving the client to time out without one; `MCP_CONNECT_TIMEOUT` changes the limit in seconds (`0` disables it). It bounds only connecting, so a long-running tool call is never cut off.
 
 ## Release Build
 

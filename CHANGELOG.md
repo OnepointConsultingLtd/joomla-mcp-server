@@ -4,6 +4,8 @@ All notable release changes for MCP Server for Joomla are recorded here.
 
 ## Unreleased
 
+- Fixed Claude Desktop extensions (`.mcpb`) downloaded from different sites replacing one another: every bundle had the same extension name, so installing one site's bundle overwrote another's and lost its bearer token ("Missing server configuration"). The extension name now includes the site's host and path, e.g. `joomla-mcp-server-example-com`. Download each site's bundle again to install them side by side; the generic GitHub bundle keeps its name.
+- The bridge now gives up after 15 seconds when the site cannot be reached and reports why (`Could not connect to <host> within 15s`), instead of hanging until the client failed with a bare "Request timed out". Set `MCP_CONNECT_TIMEOUT` (seconds, `0` to disable) to change it; only connecting is bounded, never a running tool call.
 - Added template "Updated Files" tools, matching the tab of that name in Joomla's template manager: `list_template_updated_files` lists overrides whose core file was changed by a Joomla or extension update, `diff_template_override` shows a unified diff from the core file to the override, and `manage_template_updated_files` applies "Mark Checked", "Mark Unchecked" or "Remove Record" to one or more of them. All three require `core.admin` in Governed Mode.
 
 ## 1.11.0 - 2026-11-02

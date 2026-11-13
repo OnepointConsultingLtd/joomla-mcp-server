@@ -43,6 +43,8 @@ const LOCAL_FILE_ARGUMENT = 'local_path';
 const BASE64_PREFIX = '=?base64?';
 const BASE64_SUFFIX = '?=';
 
+const DEFAULT_CONNECT_TIMEOUT_MS = 15000;
+
 const PAGINATED_LIST_METHODS = {
     'tools/list': 'tools',
     'resources/list': 'resources',
@@ -220,7 +222,7 @@ function parseSseMessages(body) {
     return messages;
 }
 
-function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, write, log = () => {} }) {
+function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS, write, log = () => {} }) {
     let serverName = 'remote-mcp-server';
     // Legacy clients declare their version once, in initialize; later requests
     // must still carry it in MCP-Protocol-Version.
@@ -335,6 +337,20 @@ function createBridge({ endpoint, bearerToken = '', rejectUnauthorized = true, w
             if (flight) {
                 flight.req = req;
             }
+            // Only connecting is bounded — DNS, TCP and, for https, the TLS
+            // handshake: a host that silently drops packets would otherwise hang
+            // until the client gives up with a bare "Request timed out". Once
+            // connected, a long tool call may take as long as it needs.
+            req.on('socket', (socket) => {
+                if (!socket.connecting || !(connectTimeoutMs > 0)) {
+                    return;
+                }
+                const timer = setTimeout(() => {
+                    req.destroy(new Error(`Could not connect to ${url.host} within ${connectTimeoutMs / 1000}s`));
+                }, connectTimeoutMs);
+                socket.once(isHttps ? 'secureConnect' : 'connect', () => clearTimeout(timer));
+                req.once('close', () => clearTimeout(timer));
+            });
             req.on('error', reject);
             req.write(payload);
             req.end();
@@ -550,6 +566,7 @@ function main() {
     const endpoint = process.argv[2];
     const bearerToken = process.argv[3] || process.env.HTTP_AUTH_BEARER || '';
     const rejectUnauthorized = process.env.MCP_IGNORE_SSL !== '1';
+    const connectTimeoutSeconds = Number(process.env.MCP_CONNECT_TIMEOUT);
 
     function log(message, data = null) {
         const timestamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
@@ -569,6 +586,9 @@ function main() {
         endpoint,
         bearerToken,
         rejectUnauthorized,
+        connectTimeoutMs: process.env.MCP_CONNECT_TIMEOUT && Number.isFinite(connectTimeoutSeconds)
+            ? connectTimeoutSeconds * 1000
+            : DEFAULT_CONNECT_TIMEOUT_MS,
         write: (data) => process.stdout.write(JSON.stringify(data) + '\n'),
         log,
     });

@@ -60,6 +60,10 @@ class McpbService
         if ($siteName !== '') {
             $manifest['display_name'] = $siteName;
         }
+        // Claude Desktop identifies an extension by author and name, so a shared
+        // name would make each site's bundle replace — and drop the token of —
+        // any other site's bundle already installed.
+        $manifest['name'] = $this->extensionName((string) $manifest['name']);
         $manifest['user_config']['endpoint_url']['default'] = $this->endpointUrl();
 
         $bundlePath = $this->createTempFile();
@@ -102,11 +106,29 @@ class McpbService
      */
     public function endpointUrl(): string
     {
+        return $this->baseUrl() . '/index.php?option=com_mcpserver&task=rpc.handle';
+    }
+
+    /**
+     * The template's extension name suffixed with this site's host and path,
+     * e.g. joomla-mcp-server-example-com-shop: stable for one site, distinct
+     * between sites, including several Joomla installs on one host.
+     */
+    private function extensionName(string $baseName): string
+    {
+        $site = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $this->baseUrl());
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($site)), '-');
+
+        return $slug === '' ? $baseName : $baseName . '-' . $slug;
+    }
+
+    private function baseUrl(): string
+    {
         $baseUrl = rtrim((string) $this->params->get('base_url', ''), '/');
         if ($baseUrl === '') {
             $baseUrl = rtrim(Uri::root(), '/');
         }
 
-        return $baseUrl . '/index.php?option=com_mcpserver&task=rpc.handle';
+        return $baseUrl;
     }
 }

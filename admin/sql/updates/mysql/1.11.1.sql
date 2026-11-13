@@ -1,0 +1,4 @@
+-- 1.11.1 fixes Claude Desktop extension connectivity and naming, adds a bridge
+-- connection timeout and template Updated Files tools, so there is no schema change.
+-- The file exists because Joomla applies update SQL by version filename: without it
+-- the 1.11.1 step is missing from the upgrade sequence.

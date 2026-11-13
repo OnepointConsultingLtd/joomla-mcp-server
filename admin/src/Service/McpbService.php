@@ -57,6 +57,10 @@ class McpbService
 
         $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
 
+        // The display name is what Claude Desktop shows, and what it names the
+        // server's log file after: a stray double space in the site name
+        // ("Meditation Center  Manhattan") is easy to miss and hard to match.
+        $siteName = trim((string) preg_replace('/\s+/u', ' ', $siteName));
         if ($siteName !== '') {
             $manifest['display_name'] = $siteName;
         }
@@ -110,14 +114,25 @@ class McpbService
     }
 
     /**
-     * The template's extension name suffixed with this site's host and path,
-     * e.g. joomla-mcp-server-example-com-shop: stable for one site, distinct
-     * between sites, including several Joomla installs on one host.
+     * This site's host and path as a lowercase slug, e.g. example-com-shop:
+     * stable for one site and distinct between sites, including several Joomla
+     * installs on one host. Clients key their servers by name, so every name
+     * offered for this site is built from it. Empty when no URL is known.
+     */
+    public function siteSlug(): string
+    {
+        $site = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $this->baseUrl());
+
+        return trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($site)), '-');
+    }
+
+    /**
+     * The template's extension name suffixed with the site slug, e.g.
+     * joomla-mcp-server-example-com-shop.
      */
     private function extensionName(string $baseName): string
     {
-        $site = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $this->baseUrl());
-        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($site)), '-');
+        $slug = $this->siteSlug();
 
         return $slug === '' ? $baseName : $baseName . '-' . $slug;
     }

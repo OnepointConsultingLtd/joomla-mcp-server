@@ -501,12 +501,12 @@ node components/com_mcpserver/mcp-http-bridge.js "https://example.com/index.php?
 
 ### MCP client configuration
 
-For your agent (e.g. Codex, Cursor, Claude, Hermes, OpenClaw), point your MCP client configuration file at the bundled bridge:
+For your agent (e.g. Codex, Cursor, Claude, Hermes, OpenClaw), point your MCP client configuration file at the bundled bridge. Give each site its own server name: a client keys its servers by name, so two sites under the same name would replace one another. The example in **Components → MCP Server** is already named after the site, e.g. `joomla-example-com`:
 
 ```json
 {
   "mcpServers": {
-    "joomla": {
+    "joomla-example-com": {
       "command": "node",
       "args": [
         "/path/to/joomla/components/com_mcpserver/mcp-http-bridge.js",
@@ -529,7 +529,7 @@ Claude Desktop on Windows spawns MCP servers with a truncated PATH that excludes
 ```json
 {
   "mcpServers": {
-    "joomla": {
+    "joomla-example-com": {
       "command": "C:\\Program Files\\nodejs\\node.exe",
       "args": [
         "C:\\path\\to\\mcp-http-bridge.js",

@@ -532,3 +532,42 @@ test('an unreadable local file becomes an isError result and nothing is sent', a
         }
     );
 });
+
+test('the bridge starts when a host script import()s it, as Claude Desktop does', async () => {
+    const { spawn } = require('node:child_process');
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => json(res, 200, { jsonrpc: '2.0', id: JSON.parse(body).id, result: { protocolVersion: '2025-06-18' } }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    // Claude Desktop's mcp-runtime/nodeHost.js: argv becomes [node, <entry>,
+    // ...args], then the entry is import()ed, so require.main is not the bridge.
+    const bridgePath = path.join(__dirname, '..', '..', 'site', 'mcp-http-bridge.js');
+    const host = `process.argv = ['node', ${JSON.stringify(bridgePath)}, process.argv[1]];`
+        + `import(require('node:url').pathToFileURL(${JSON.stringify(bridgePath)}).toString());`;
+    const child = spawn(process.execPath, ['-e', host, `http://127.0.0.1:${server.address().port}/mcp`], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+    try {
+        const reply = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('the bridge never answered')), 5000);
+            let out = '';
+            child.stdout.on('data', (chunk) => {
+                out += chunk;
+                if (out.includes('\n')) {
+                    clearTimeout(timer);
+                    resolve(JSON.parse(out.split('\n')[0]));
+                }
+            });
+            child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+        });
+
+        assert.equal(reply.id, 0);
+        assert.equal(reply.result.protocolVersion, '2025-06-18');
+    } finally {
+        child.kill();
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+    }
+});

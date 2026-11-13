@@ -76,7 +76,7 @@ class McpbServiceTest extends TestCase
         $manifest = $this->buildManifest('https://Manhattan.Example.org/', 'Meditation Center  Manhattan');
 
         $this->assertSame('joomla-mcp-server-manhattan-example-org', $manifest['name']);
-        $this->assertSame('Meditation Center  Manhattan', $manifest['display_name']);
+        $this->assertSame('Meditation Center Manhattan', $manifest['display_name']);
         $this->assertSame(
             'https://Manhattan.Example.org/index.php?option=com_mcpserver&task=rpc.handle',
             $manifest['user_config']['endpoint_url']['default']
@@ -92,6 +92,18 @@ class McpbServiceTest extends TestCase
         $this->assertSame(
             'joomla-mcp-server-example-com-blog',
             $this->buildManifest('http://example.com/blog', 'Blog')['name']
+        );
+    }
+
+    public function testSiteSlugNamesTheSiteForClientConfiguration(): void
+    {
+        $this->assertSame(
+            'manhattan-example-org',
+            (new McpbService(new Registry(['base_url' => 'https://Manhattan.Example.org/'])))->siteSlug()
+        );
+        $this->assertSame(
+            'example-com-8080-shop',
+            (new McpbService(new Registry(['base_url' => 'http://example.com:8080/shop'])))->siteSlug()
         );
     }
 

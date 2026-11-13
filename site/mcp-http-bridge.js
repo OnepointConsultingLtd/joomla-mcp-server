@@ -627,6 +627,29 @@ module.exports = {
     createBridge,
 };
 
-if (require.main === module) {
+/**
+ * Whether this file is the program being run, rather than a library required
+ * by the tests. require.main alone is not enough: Claude Desktop's built-in
+ * Node runs an extension under its own host script, which sets process.argv to
+ * [node, <this file>, ...args] and then import()s this file — so require.main
+ * is never this module, and checking only it left the bridge idle, never
+ * reading stdin, in every .mcpb since 1.10.0.
+ */
+function isEntryPoint() {
+    if (require.main === module) {
+        return true;
+    }
+    const script = process.argv[1];
+    if (!script) {
+        return false;
+    }
+    try {
+        return fs.realpathSync(script) === fs.realpathSync(__filename);
+    } catch {
+        return false;
+    }
+}
+
+if (isEntryPoint()) {
     main();
 }

@@ -96,8 +96,8 @@ HTMLHelper::_('behavior.core');
                                 <span class="badge bg-success">Bearer Token Enabled</span>
                                 <span class="ms-2">
                                     <code id="tokenDisplay"><?php echo htmlspecialchars($this->mcpConfig['maskedToken']); ?></code>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="tokenRevealBtn" onclick="toggleTokenReveal()">
-                                        <span class="icon-eye" aria-hidden="true"></span> Reveal
+                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="copyToken(this)">
+                                        <span class="icon-copy" aria-hidden="true"></span> Copy
                                     </button>
                                 </span>
                             <?php else: ?>
@@ -112,53 +112,53 @@ HTMLHelper::_('behavior.core');
 </div>
 
 <script>
-var _tokenRevealed = false;
-var _maskedToken = <?php echo json_encode($this->mcpConfig['maskedToken']); ?>;
+// The token is never written into the page as visible text: the display keeps
+// the masked value and the Copy button puts the real token on the clipboard.
 var _realToken = <?php echo json_encode($this->mcpConfig['token']); ?>;
 
-function toggleTokenReveal() {
-    var display = document.getElementById('tokenDisplay');
-    var btn = document.getElementById('tokenRevealBtn');
-    if (!display || !btn) return;
-    _tokenRevealed = !_tokenRevealed;
-    if (_tokenRevealed) {
-        display.textContent = _realToken;
-        btn.innerHTML = '<span class="icon-eye-close" aria-hidden="true"></span> Hide';
-    } else {
-        display.textContent = _maskedToken;
-        btn.innerHTML = '<span class="icon-eye" aria-hidden="true"></span> Reveal';
-    }
+function copyToken(btn) {
+    if (_realToken) copyText(_realToken, btn);
 }
 
 function copyToClipboard(btn) {
     const codeElement = document.querySelector('#mcpConfigJson code');
-    if (!codeElement) return;
+    if (codeElement) copyText(codeElement.innerText, btn);
+}
 
-    const text = codeElement.innerText;
-    
-    navigator.clipboard.writeText(text).then(() => {
-        const originalHtml = btn.innerHTML;
+function copyText(text, btn) {
+    const originalHtml = btn.innerHTML;
+    const flashCopied = () => {
         btn.innerHTML = '<span class="icon-check" aria-hidden="true"></span> Copied!';
         btn.classList.replace('btn-outline-secondary', 'btn-success');
-        
         setTimeout(() => {
             btn.innerHTML = originalHtml;
             btn.classList.replace('btn-success', 'btn-outline-secondary');
         }, 2000);
-    }).catch(err => {
-        console.error('Failed to copy: ', err);
-        // Fallback for older browsers
-        const textArea = document.createElement("textarea");
+    };
+
+    // navigator.clipboard is undefined outside secure contexts (plain-HTTP
+    // admin), so fall back to execCommand in that case as well as on rejection.
+    const fallback = () => {
+        const textArea = document.createElement('textarea');
         textArea.value = text;
+        textArea.setAttribute('readonly', '');
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
         document.body.appendChild(textArea);
         textArea.select();
         try {
-            document.execCommand('copy');
-            btn.innerHTML = '<span class="icon-check" aria-hidden="true"></span> Copied!';
-            setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
-        } catch (e) {}
+            if (document.execCommand('copy')) flashCopied();
+        } catch (e) {
+            console.error('Failed to copy: ', e);
+        }
         document.body.removeChild(textArea);
-    });
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(flashCopied, fallback);
+    } else {
+        fallback();
+    }
 }
 </script>
 

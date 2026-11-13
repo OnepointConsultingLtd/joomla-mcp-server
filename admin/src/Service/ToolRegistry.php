@@ -1273,6 +1273,95 @@ class ToolRegistry
         ]);
 
         $this->register([
+            'name' => 'list_template_updated_files',
+            'description' => 'List a template\'s "Updated Files" (the tab of that name in Joomla\'s template manager): overrides whose '
+                . 'core source file was changed by a Joomla or extension update after the override was created, so the override may '
+                . 'need reviewing. Read from `#__template_overrides`. `path` is relative to the template root, `checked` reflects '
+                . '"Mark Checked"/"Mark Unchecked", and `action` is the update that flagged it. Records whose override file no longer '
+                . 'exists are omitted, as Joomla does. Use diff_template_override to compare a file with its core original and '
+                . 'manage_template_updated_files to mark records checked/unchecked or remove them.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'extension_id' => ['type' => 'integer', 'description' => 'Template extension ID (from list_installed_templates)'],
+                    'unchecked_only' => [
+                        'type' => 'boolean',
+                        'default' => false,
+                        'description' => 'Return only records not yet marked checked',
+                    ],
+                ],
+                'required' => ['extension_id'],
+            ],
+            'annotations' => [
+                'title' => 'List Template Updated Files',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'diff_template_override',
+            'description' => 'Compare a template override with the core file it overrides (the original component view, module '
+                . 'layout or JLayout, resolved the way Joomla\'s template editor does). Returns a unified diff from the core file '
+                . 'to the override. `path` is relative to the template root and must be under html/, e.g. '
+                . '"html/com_content/article/default.php" as returned by list_template_updated_files. Set `include_sources` to '
+                . 'also return both full files.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'extension_id' => ['type' => 'integer', 'description' => 'Template extension ID'],
+                    'path' => ['type' => 'string', 'description' => 'Override file path relative to the template root (under html/)'],
+                    'include_sources' => [
+                        'type' => 'boolean',
+                        'default' => false,
+                        'description' => 'Also return the full core and override sources',
+                    ],
+                ],
+                'required' => ['extension_id', 'path'],
+            ],
+            'annotations' => [
+                'title' => 'Diff Template Override',
+                'readOnlyHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
+            'name' => 'manage_template_updated_files',
+            'description' => 'Apply one of the "Updated Files" toolbar actions of Joomla\'s template manager to one or more records '
+                . 'from list_template_updated_files: "mark_checked" (reviewed), "mark_unchecked", or "remove_record" (deletes the '
+                . 'tracking record only — the override file itself is untouched). `paths` are relative to the template root. '
+                . 'Paths with no record for this template are reported in `not_found`.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'extension_id' => ['type' => 'integer', 'description' => 'Template extension ID'],
+                    'paths' => [
+                        'type' => 'array',
+                        'items' => ['type' => 'string'],
+                        'minItems' => 1,
+                        'description' => 'Override file paths relative to the template root, e.g. ["html/com_content/article/default.php"]',
+                    ],
+                    'action' => [
+                        'type' => 'string',
+                        'enum' => ['mark_checked', 'mark_unchecked', 'remove_record'],
+                        'description' => 'mark_checked / mark_unchecked set the record state; remove_record deletes the record',
+                    ],
+                ],
+                'required' => ['extension_id', 'paths', 'action'],
+            ],
+            'annotations' => [
+                'title' => 'Manage Template Updated Files',
+                'readOnlyHint' => false,
+                'destructiveHint' => true,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ],
+        ]);
+
+        $this->register([
             'name' => 'list_article_associations',
             'description' => 'List the cross-language associations for a Joomla article. Returns the sibling articles that share an association key in context "com_content.item".',
             'inputSchema' => [

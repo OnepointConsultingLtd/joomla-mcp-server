@@ -2,6 +2,16 @@
 
 All notable release changes for MCP Server for Joomla are recorded here.
 
+## Unreleased
+
+## 1.11.1 - 2026-11-13
+
+- Fixed the Claude Desktop extension (`.mcpb`) never connecting since 1.10.0 ("Unable to connect to extension server", or "Request timed out" for Cowork and Code sessions). Download the extension again after upgrading.
+- The example client configuration now names the server after the site (e.g. `joomla-example-com`) instead of `joomla`.
+- Fixed Claude Desktop extensions (`.mcpb`) downloaded from different sites replacing one another.
+- The bridge now gives up after 15 seconds when the site cannot be reached and reports why (`Could not connect to <host> within 15s`), instead of hanging until the client failed with a bare "Request timed out".
+- Added template "Updated Files" tools, matching the tab of that name in Joomla's template manager: `list_template_updated_files`, `diff_template_override`, and `manage_template_updated_files`.
+
 ## 1.11.0 - 2026-11-02
 
 - Added five redirect management tools (`list_redirects`, `get_redirect`, `create_redirect`, `update_redirect`, `delete_redirect`) covering `com_redirect`, including filtering and sorting across all redirect links (such as unresolved 404s sorted by hits) and automatic trashing before permanent deletion.

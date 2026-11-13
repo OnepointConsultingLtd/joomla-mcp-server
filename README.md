@@ -2,7 +2,7 @@
 
 A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server over HTTP JSON-RPC. It lets MCP clients such as Claude Desktop and Cursor work with Joomla content through the site's own Joomla Web Services API.
 
-**Version:** 1.11.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
+**Version:** 1.11.1 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
 
 ## Features
 
@@ -20,7 +20,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 
 ## MCP Tools
 
-The component exposes 95 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
+The component exposes 98 tools grouped by Joomla domain. List tools include a `pagination` object (`total_count`, `count`, `offset`, `has_more`, `next_offset`) so agents can page through large result sets. Write tools use Joomla's Web Services API where possible; a small number of behaviours not exposed cleanly through Web Services (custom module HTML writes, multilingual associations, template file editing) are handled through Joomla's database or filesystem APIs.
 
 ### Articles
 
@@ -167,6 +167,9 @@ To upload a file from the client's computer, pass its path as `local_path`, e.g.
 | `get_template_file` | Read the source of a single template file |
 | `update_template_file` | Write the source of a template file, creating it if its parent directory exists |
 | `create_template_override` | Create a template override by copying a core view, module, plugin or layout into the template |
+| `list_template_updated_files` | List the template's "Updated Files": overrides whose core file changed in a Joomla or extension update |
+| `diff_template_override` | Show a unified diff from the core file to the template override (optionally with both full sources) |
+| `manage_template_updated_files` | Mark Updated Files records checked or unchecked, or remove the records (override files are untouched) |
 
 ### Extensions
 
@@ -468,7 +471,7 @@ Not implemented, all optional in the specification: OAuth authorization (clients
 
 For Claude Desktop the easiest client setup is the bundled extension: a `.mcpb` file (a zip in the [MCPB](https://github.com/modelcontextprotocol/mcpb) format) that installs with a double-click. It contains the component's own zero-dependency HTTP bridge, so there is no Node.js install, no npm package and no hand-edited JSON — Claude Desktop supplies the Node runtime itself, and the connector appears as *MCP Server for Joomla* with the project logo.
 
-**Download it from your own site (recommended).** In **Administrator → Components → MCP Server**, click **Download Claude Desktop extension** in the MCP Client Configuration card. The component generates a personalised bundle on the fly: the endpoint URL is pre-filled and the connector is named after the site, which keeps several Joomla sites clearly distinguishable in Claude Desktop.
+**Download it from your own site (recommended).** In **Administrator → Components → MCP Server**, click **Download Claude Desktop extension** in the MCP Client Configuration card. The component generates a personalised bundle on the fly: the endpoint URL is pre-filled and the connector is named after the site. Each site's bundle also gets its own extension name, derived from the site's URL, so several Joomla sites can be installed side by side in Claude Desktop. Bundles downloaded from 1.11.0 or earlier all shared one extension name, so installing one replaced another and lost its bearer token; download each site's bundle again to install them side by side.
 
 **Or download the generic bundle.** Every GitHub release also publishes `com_mcpserver.mcpb` alongside the component zip.
 
@@ -498,12 +501,12 @@ node components/com_mcpserver/mcp-http-bridge.js "https://example.com/index.php?
 
 ### MCP client configuration
 
-For your agent (e.g. Codex, Cursor, Claude, Hermes, OpenClaw), point your MCP client configuration file at the bundled bridge:
+For your agent (e.g. Codex, Cursor, Claude, Hermes, OpenClaw), point your MCP client configuration file at the bundled bridge. Give each site its own server name: a client keys its servers by name, so two sites under the same name would replace one another. The example in **Components → MCP Server** is already named after the site, e.g. `joomla-example-com`:
 
 ```json
 {
   "mcpServers": {
-    "joomla": {
+    "joomla-example-com": {
       "command": "node",
       "args": [
         "/path/to/joomla/components/com_mcpserver/mcp-http-bridge.js",
@@ -526,7 +529,7 @@ Claude Desktop on Windows spawns MCP servers with a truncated PATH that excludes
 ```json
 {
   "mcpServers": {
-    "joomla": {
+    "joomla-example-com": {
       "command": "C:\\Program Files\\nodejs\\node.exe",
       "args": [
         "C:\\path\\to\\mcp-http-bridge.js",
@@ -542,7 +545,7 @@ Claude Desktop on Windows spawns MCP servers with a truncated PATH that excludes
 
 Fully quit Claude Desktop from the tray after editing the configuration — closing the window is not enough.
 
-The bearer token can also be supplied through `HTTP_AUTH_BEARER`. Set `MCP_IGNORE_SSL=1` only for local development with self-signed certificates.
+The bearer token can also be supplied through `HTTP_AUTH_BEARER`. Set `MCP_IGNORE_SSL=1` only for local development with self-signed certificates. If the site cannot be reached, the bridge gives up after 15 seconds of trying to connect (DNS, TCP and the TLS handshake) and reports the cause (e.g. `Could not connect to example.com within 15s`) instead of leaving the client to time out without one; `MCP_CONNECT_TIMEOUT` changes the limit in seconds (`0` disables it). It bounds only connecting, so a long-running tool call is never cut off.
 
 ## Release Build
 

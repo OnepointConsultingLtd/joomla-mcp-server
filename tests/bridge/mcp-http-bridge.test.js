@@ -9,6 +9,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const https = require('node:https');
+const EventEmitter = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -215,6 +217,86 @@ test('an HTTP error without a JSON body becomes a JSON-RPC error for the request
             assert.match(output[0].error.message, /HTTP Error 502/);
         }
     );
+});
+
+/**
+ * Stand in for http.request with a request whose socket never connects, as
+ * when a firewall silently drops the packets.
+ */
+async function withUnreachableHost(run) {
+    const originals = [http.request, https.request];
+    const sockets = [];
+    http.request = https.request = () => {
+        const req = new EventEmitter();
+        const socket = new EventEmitter();
+        socket.connecting = true;
+        sockets.push(socket);
+        req.write = () => {};
+        req.end = () => setImmediate(() => req.emit('socket', socket));
+        req.destroy = (error) => { req.emit('error', error); req.emit('close'); };
+        return req;
+    };
+    try {
+        await run(sockets);
+    } finally {
+        [http.request, https.request] = originals;
+    }
+}
+
+test('a host that never accepts the connection fails fast with the cause', async () => {
+    await withUnreachableHost(async () => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'http://unreachable.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        await bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'initialize', params: { protocolVersion: '2025-11-25' } }));
+
+        assert.equal(output.length, 1);
+        assert.equal(output[0].id, 9);
+        assert.equal(output[0].error.message, 'Could not connect to unreachable.test within 0.02s');
+    });
+});
+
+test('the connect timeout stops once the connection is made', async () => {
+    await withUnreachableHost(async (sockets) => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'http://slow.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/list', params: {} }));
+        await new Promise((resolve) => setImmediate(resolve));
+        sockets[0].emit('connect');
+        await new Promise((resolve) => setTimeout(resolve, 60));
+
+        // Connected but still waiting on the server: a slow reply is not an error.
+        assert.deepEqual(output, []);
+    });
+});
+
+test('over https the connect timeout also covers the TLS handshake', async () => {
+    await withUnreachableHost(async (sockets) => {
+        const output = [];
+        const bridge = createBridge({
+            endpoint: 'https://stalled-tls.test/mcp',
+            connectTimeoutMs: 20,
+            write: (message) => output.push(message),
+        });
+
+        const pending = bridge.handleInput(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'initialize', params: { protocolVersion: '2025-11-25' } }));
+        await new Promise((resolve) => setImmediate(resolve));
+        // TCP connected, but the TLS handshake never completes.
+        sockets[0].emit('connect');
+        await pending;
+
+        assert.equal(output.length, 1);
+        assert.equal(output[0].error.message, 'Could not connect to stalled-tls.test within 0.02s');
+    });
 });
 
 test('a request whose reply carries no response gets an error instead of hanging', async () => {
@@ -449,4 +531,43 @@ test('an unreadable local file becomes an isError result and nothing is sent', a
             assert.match(output[1].result.content[0].text, /cannot read .*file\.png/);
         }
     );
+});
+
+test('the bridge starts when a host script import()s it, as Claude Desktop does', async () => {
+    const { spawn } = require('node:child_process');
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => json(res, 200, { jsonrpc: '2.0', id: JSON.parse(body).id, result: { protocolVersion: '2025-06-18' } }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    // Claude Desktop's mcp-runtime/nodeHost.js: argv becomes [node, <entry>,
+    // ...args], then the entry is import()ed, so require.main is not the bridge.
+    const bridgePath = path.join(__dirname, '..', '..', 'site', 'mcp-http-bridge.js');
+    const host = `process.argv = ['node', ${JSON.stringify(bridgePath)}, process.argv[1]];`
+        + `import(require('node:url').pathToFileURL(${JSON.stringify(bridgePath)}).toString());`;
+    const child = spawn(process.execPath, ['-e', host, `http://127.0.0.1:${server.address().port}/mcp`], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+    try {
+        const reply = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('the bridge never answered')), 5000);
+            let out = '';
+            child.stdout.on('data', (chunk) => {
+                out += chunk;
+                if (out.includes('\n')) {
+                    clearTimeout(timer);
+                    resolve(JSON.parse(out.split('\n')[0]));
+                }
+            });
+            child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+        });
+
+        assert.equal(reply.id, 0);
+        assert.equal(reply.result.protocolVersion, '2025-06-18');
+    } finally {
+        child.kill();
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+    }
 });

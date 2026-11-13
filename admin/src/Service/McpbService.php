@@ -57,9 +57,17 @@ class McpbService
 
         $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
 
+        // The display name is what Claude Desktop shows, and what it names the
+        // server's log file after: a stray double space in the site name
+        // ("Meditation Center  Manhattan") is easy to miss and hard to match.
+        $siteName = trim((string) preg_replace('/\s+/u', ' ', $siteName));
         if ($siteName !== '') {
             $manifest['display_name'] = $siteName;
         }
+        // Claude Desktop identifies an extension by author and name, so a shared
+        // name would make each site's bundle replace — and drop the token of —
+        // any other site's bundle already installed.
+        $manifest['name'] = $this->extensionName((string) $manifest['name']);
         $manifest['user_config']['endpoint_url']['default'] = $this->endpointUrl();
 
         $bundlePath = $this->createTempFile();
@@ -102,11 +110,40 @@ class McpbService
      */
     public function endpointUrl(): string
     {
+        return $this->baseUrl() . '/index.php?option=com_mcpserver&task=rpc.handle';
+    }
+
+    /**
+     * This site's host and path as a lowercase slug, e.g. example-com-shop:
+     * stable for one site and distinct between sites, including several Joomla
+     * installs on one host. Clients key their servers by name, so every name
+     * offered for this site is built from it. Empty when no URL is known.
+     */
+    public function siteSlug(): string
+    {
+        $site = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $this->baseUrl());
+
+        return trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($site)), '-');
+    }
+
+    /**
+     * The template's extension name suffixed with the site slug, e.g.
+     * joomla-mcp-server-example-com-shop.
+     */
+    private function extensionName(string $baseName): string
+    {
+        $slug = $this->siteSlug();
+
+        return $slug === '' ? $baseName : $baseName . '-' . $slug;
+    }
+
+    private function baseUrl(): string
+    {
         $baseUrl = rtrim((string) $this->params->get('base_url', ''), '/');
         if ($baseUrl === '') {
             $baseUrl = rtrim(Uri::root(), '/');
         }
 
-        return $baseUrl . '/index.php?option=com_mcpserver&task=rpc.handle';
+        return $baseUrl;
     }
 }

@@ -57,8 +57,13 @@ class HtmlView extends BaseHtmlView
      */
     private function generateMcpConfig(\Joomla\Registry\Registry $params): array
     {
-        $rpcUrl = $this->getMcpbService()->endpointUrl();
+        $mcpbService = $this->getMcpbService();
+        $rpcUrl = $mcpbService->endpointUrl();
         $token = (string) $params->get('mcp_bearer_token', '');
+        // Named after the site: a bare "joomla" would collide in a client
+        // configured for several sites, the later entry replacing the earlier.
+        $siteSlug = $mcpbService->siteSlug();
+        $serverName = $siteSlug === '' ? 'joomla' : 'joomla-' . $siteSlug;
         
         $args = [
             '-y',
@@ -84,7 +89,7 @@ class HtmlView extends BaseHtmlView
 
         $config = [
             'mcpServers' => [
-                'joomla' => $server,
+                $serverName => $server,
             ],
         ];
 

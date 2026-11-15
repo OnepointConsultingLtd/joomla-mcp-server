@@ -59,4 +59,10 @@ jobs:
         run: ./build.sh
 
       - name: Verify package artifact
-        run: test -f "com_mcpserver-$(grep -oP '<version>\K[^<]+' mcpserver.xml).zip"
+        run: |
+          PACKAGE="pkg_mcpserver-$(grep -oP '<version>\K[^<]+' mcpserver.xml).zip"
+          test -f "$PACKAGE"
+          # The package must carry both extensions.
+          unzip -l "$PACKAGE" | grep -q 'packages/com_mcpserver.zip'
+          unzip -l "$PACKAGE" | grep -q 'packages/plg_system_mcpserver.zip'
+

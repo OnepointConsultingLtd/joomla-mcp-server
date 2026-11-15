@@ -59,6 +59,28 @@ final class GovernedCredentialAuthenticator
             throw new \RuntimeException(self::FAILURE);
         }
 
+        return $this->principalFor($record);
+    }
+
+    /**
+     * Resolves a credential the caller has already authenticated by other
+     * means: an OAuth access token whose grant is bound to it. The credential
+     * still has to be active, unexpired, unrevoked and decryptable, so
+     * revoking it ends every OAuth grant built on it.
+     */
+    public function authenticateBoundCredential(string $selector, DateTimeImmutable $now): AuthenticatedPrincipal
+    {
+        $record = $this->store->findBySelector($selector);
+
+        if (!$this->isUsable($record, $now)) {
+            throw new \RuntimeException(self::FAILURE);
+        }
+
+        return $this->principalFor($record);
+    }
+
+    private function principalFor(CredentialRecord $record): AuthenticatedPrincipal
+    {
         try {
             $token = $this->cipher->decrypt($record->encryptedToken);
         } catch (\RuntimeException) {

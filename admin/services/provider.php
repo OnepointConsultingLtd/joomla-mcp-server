@@ -46,6 +46,8 @@ use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialLifecycleStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialRequestStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialStore;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServiceFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenOwnershipValidator;
 use Joomla\Component\Mcpserver\Administrator\Service\McpbService;
@@ -151,11 +153,18 @@ return new class implements ServiceProviderInterface {
 
         // Governed-mode auth service
         $container->share(GovernedAuthService::class, function (Container $container) {
+            $params = ComponentHelper::getParams('com_mcpserver');
+
             return new GovernedAuthService(
                 $container->get(GovernedCredentialAuthenticator::class),
                 static function (string $name, string $default): string {
                     return Factory::getApplication()->input->server->getString($name, $default);
-                }
+                },
+                // OAuth access tokens are accepted only while OAuth is switched
+                // on, so turning it off ends all OAuth access at once.
+                OAuthConfig::isEnabled($params)
+                    ? OAuthServiceFactory::tokenAuthenticator(Uri::getInstance()->toString(), $params)
+                    : null
             );
         });
 

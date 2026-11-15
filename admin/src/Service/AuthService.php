@@ -111,10 +111,9 @@ class AuthService
                 return ['error' => 'Authentication required but no server token configured', 'code' => JsonRpc::FORBIDDEN];
             }
 
-            $authHeader = $input->server->getString('HTTP_AUTHORIZATION', '');
-            if (empty($authHeader)) {
-                $authHeader = $input->server->getString('REDIRECT_HTTP_AUTHORIZATION', '');
-            }
+            $authHeader = AuthorizationHeader::read(
+                static fn (string $name, string $default): string => $input->server->getString($name, $default)
+            );
 
             $providedToken = '';
             if (str_starts_with($authHeader, 'Bearer ')) {

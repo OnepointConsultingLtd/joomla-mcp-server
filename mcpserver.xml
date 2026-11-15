@@ -6,7 +6,7 @@
     <authorEmail>allan@onepointltd.com</authorEmail>
     <copyright>Copyright (C) 2026 Onepoint Consulting Ltd</copyright>
     <creationDate>2025-08-13</creationDate>
-    <version>1.11.1</version>
+    <version>1.12.0</version>
     <license>GPL-2.0-or-later</license>
     <description>Model Context Protocol server component for Joomla</description>
     <element>com_mcpserver</element>
@@ -26,6 +26,8 @@
             <filename>icon.png</filename>
             <folder>src</folder>
             <folder>services</folder>
+            <folder>tmpl</folder>
+            <folder>language</folder>
         </files>
     </site>
 
@@ -75,9 +77,12 @@
         </files>
     </administration>
 
-    <updateservers>
-        <server type="extension" priority="1" name="MCP Server for Joomla">https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/update.xml</server>
-    </updateservers>
+    <!--
+        No update server: from 1.12.0 the component is released inside
+        pkg_mcpserver, whose manifest carries it. Sites that installed the
+        component on its own keep their old update site, and update.xml offers
+        it the 1.12.0 package once (see scripts/sync_update_entry.py).
+    -->
 
     <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
 
@@ -115,6 +120,17 @@
                     <option value="0">JNO</option>
                     <option value="1">JYES</option>
                 </field>
+                <field name="oauth_enabled" type="radio" label="COM_MCPSERVER_CONFIG_OAUTH_ENABLED" description="COM_MCPSERVER_CONFIG_OAUTH_ENABLED_DESC" default="0" class="btn-group" showon="governed_mode:1">
+                    <option value="0">JNO</option>
+                    <option value="1">JYES</option>
+                </field>
+                <field name="oauth_allow_registration" type="radio" label="COM_MCPSERVER_CONFIG_OAUTH_ALLOW_REGISTRATION" description="COM_MCPSERVER_CONFIG_OAUTH_ALLOW_REGISTRATION_DESC" default="1" class="btn-group" showon="governed_mode:1[AND]oauth_enabled:1">
+                    <option value="0">JNO</option>
+                    <option value="1">JYES</option>
+                </field>
+                <field name="oauth_allowed_redirect_hosts" type="textarea" label="COM_MCPSERVER_CONFIG_OAUTH_ALLOWED_REDIRECT_HOSTS" description="COM_MCPSERVER_CONFIG_OAUTH_ALLOWED_REDIRECT_HOSTS_DESC" rows="3" showon="governed_mode:1[AND]oauth_enabled:1" />
+                <field name="oauth_access_token_ttl" type="number" label="COM_MCPSERVER_CONFIG_OAUTH_ACCESS_TOKEN_TTL" description="COM_MCPSERVER_CONFIG_OAUTH_ACCESS_TOKEN_TTL_DESC" default="3600" min="300" max="86400" step="1" showon="governed_mode:1[AND]oauth_enabled:1" />
+                <field name="oauth_refresh_token_ttl_days" type="number" label="COM_MCPSERVER_CONFIG_OAUTH_REFRESH_TOKEN_TTL_DAYS" description="COM_MCPSERVER_CONFIG_OAUTH_REFRESH_TOKEN_TTL_DAYS_DESC" default="30" min="1" max="365" step="1" showon="governed_mode:1[AND]oauth_enabled:1" />
                 <field name="credential_salt" type="hidden" default="" />
             </fieldset>
             <fieldset name="monitoring" label="COM_MCPSERVER_CONFIG_FIELDSET_MONITORING">

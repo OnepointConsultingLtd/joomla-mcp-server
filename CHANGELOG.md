@@ -4,6 +4,13 @@ All notable release changes for MCP Server for Joomla are recorded here.
 
 ## Unreleased
 
+## 1.12.0 - Unreleased
+
+- Added OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web. The client is given only the endpoint URL. It registers itself (Dynamic Client Registration) or identifies itself with a Client ID Metadata Document, the user signs in to the site and chooses one of their Governed Mode credentials, and the client then acts as that credential, with its approval, expiry, revocation and audit trail. Turn it on with **OAuth Sign-in** in Options → Security Settings (needs Governed Mode).
+- Added the **System - MCP Server** plugin. It serves the OAuth discovery documents at `/.well-known/` and the `/mcp-oauth/` endpoints, and does nothing while OAuth Sign-in is off.
+- Releases are now the `pkg_mcpserver-<version>.zip` package, which installs the component and the plugin together. Sites on 1.11.x are offered it as a component update; it installs over the existing component, keeping settings and data, and later updates come through the package.
+- Added a `WWW-Authenticate` header to HTTP 401 responses from the MCP endpoint while OAuth Sign-in is on, pointing OAuth-capable clients at the site's Protected Resource Metadata.
+
 ## 1.11.1 - 2026-11-13
 
 - Fixed the Claude Desktop extension (`.mcpb`) never connecting since 1.10.0 ("Unable to connect to extension server", or "Request timed out" for Cowork and Code sessions). Download the extension again after upgrading.

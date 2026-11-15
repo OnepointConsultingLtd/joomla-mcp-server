@@ -18,6 +18,7 @@ use Joomla\CMS\Uri\Uri;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
+use Joomla\Component\Mcpserver\Administrator\Service\AuthorizationHeader;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernedToolAuthorizer;
@@ -29,6 +30,9 @@ use Joomla\Component\Mcpserver\Administrator\Service\McpHttpTransport;
 use Joomla\Component\Mcpserver\Administrator\Service\McpProtocolError;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServer;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServiceFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadException;
 use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
@@ -94,6 +98,7 @@ trait RpcHandlerTrait
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             header('Content-Type: application/json; charset=utf-8');
+            $this->sendOAuthChallenge($params, $authError);
             http_response_code($authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
             $this->recordGovernanceAudit(
@@ -256,6 +261,7 @@ trait RpcHandlerTrait
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
+            $this->sendOAuthChallenge($params, $authError);
             http_response_code($code);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
             $this->recordGovernanceAudit($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context, null, null, null, $headerVersion);
@@ -488,6 +494,7 @@ trait RpcHandlerTrait
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
+            $this->sendOAuthChallenge($params, $authError);
             $this->rejectUpload($startTime, $code, $authError['code'], $authError['error'], 'auth_failed', $clientIp, $context, null);
             return;
         }
@@ -769,12 +776,48 @@ trait RpcHandlerTrait
         // without them here, browser-based clients fail CORS preflight.
         header('Access-Control-Allow-Headers: Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
         header('Access-Control-Max-Age: 3600');
+        // So a browser-based client can read the OAuth challenge on a 401.
+        header('Access-Control-Expose-Headers: WWW-Authenticate');
 
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
             header('Content-Length: 0');
             http_response_code(204);
             Factory::getApplication()->close();
         }
+    }
+
+    /**
+     * On a 401, points an OAuth-capable MCP client at this site's Protected
+     * Resource Metadata (RFC 9728 §5.1), which is how clients such as
+     * ChatGPT and Claude discover that they can sign in here.
+     *
+     * Site context only: the authorisation flow signs users in to the site.
+     * The resource named is the URL the client actually called, reduced to
+     * its option/task, so the metadata matches the server URL it was given.
+     *
+     * @param array{error:string,code:int} $authError
+     */
+    private function sendOAuthChallenge(Registry $params, array $authError): void
+    {
+        $app = Factory::getApplication();
+        if ($authError['code'] !== JsonRpc::UNAUTHORIZED || $app->getName() !== 'site' || !OAuthConfig::isEnabled($params)) {
+            return;
+        }
+
+        $uri = clone Uri::getInstance();
+        $uri->setQuery(array_intersect_key($uri->getQuery(true), ['option' => true, 'task' => true]));
+        $resource = $uri->toString(['scheme', 'user', 'pass', 'host', 'port', 'path', 'query']);
+
+        $config = OAuthServiceFactory::config($params);
+        $challenge = 'Bearer resource_metadata="' . $config->protectedResourceMetadataUrl($resource) . '", scope="' . OAuthServer::SCOPE . '"';
+
+        // RFC 6750 §3.1: no error code when no credentials were sent at all.
+        $server = $app->input->server;
+        if (AuthorizationHeader::read(static fn (string $name, string $default): string => $server->getString($name, $default)) !== '') {
+            $challenge .= ', error="invalid_token"';
+        }
+
+        header('WWW-Authenticate: ' . $challenge);
     }
 
     /**

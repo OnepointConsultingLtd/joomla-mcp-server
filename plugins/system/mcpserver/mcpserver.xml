@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension type="plugin" group="system" method="upgrade">
+    <name>plg_system_mcpserver</name>
+    <author>Onepoint Consulting Ltd</author>
+    <authorUrl>https://github.com/OnepointConsultingLtd/joomla-mcp-server</authorUrl>
+    <copyright>Copyright (C) 2026 Onepoint Consulting Ltd</copyright>
+    <creationDate>2026-11-15</creationDate>
+    <!-- Synced from mcpserver.xml by build.sh. -->
+    <version>1.12.0</version>
+    <license>GPL-2.0-or-later</license>
+    <description>PLG_SYSTEM_MCPSERVER_XML_DESCRIPTION</description>
+    <namespace path="src">Joomla\Plugin\System\Mcpserver</namespace>
+    <files>
+        <folder plugin="mcpserver">services</folder>
+        <folder>src</folder>
+        <folder>language</folder>
+    </files>
+    <languages folder="language">
+        <language tag="en-GB">en-GB/plg_system_mcpserver.ini</language>
+        <language tag="en-GB">en-GB/plg_system_mcpserver.sys.ini</language>
+    </languages>
+</extension>

@@ -11,6 +11,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 - Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log — restricted to the viewer's own requests unless they are a Super User
 - One-click Claude Desktop extension (`.mcpb`), generated on demand from the administrator or attached to every release
 - Security with bearer token authentication, optional IP allow-listing and `Origin` validation
+- OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web, with each connection bound to a Governed Mode credential (see [OAuth Sign-in](#oauth-sign-in))
 - Configurable fixed-window rate limiting
 - Response caching through Joomla's cache layer
 - JSON Schema validation for MCP tool inputs
@@ -300,7 +301,9 @@ Clients that support completion get suggestions while filling in prompt argument
 
 ## Installation
 
-Download the latest `com_mcpserver-<version>.zip` package from the GitHub releases page, then install it in Joomla Administrator via **System → Install → Extensions**.
+Download the latest `pkg_mcpserver-<version>.zip` package from the GitHub releases page, then install it in Joomla Administrator via **System → Install → Extensions**. It installs the component and the **System - MCP Server** plugin (which serves the [OAuth Sign-in](#oauth-sign-in) URLs), and Joomla lists it under **Extensions: Manage** as the *MCP Server for Joomla* package.
+
+**Upgrading from 1.11.x or earlier**, where the component was installed on its own: Joomla offers the 1.12.0 update on the component as usual. It installs the package over the existing component, keeping all settings and data, and later updates come through the package. To uninstall, uninstall the package; Joomla will not remove the component or plugin separately.
 
 For a local development build:
 
@@ -308,7 +311,7 @@ For a local development build:
 ./build.sh
 ```
 
-The build creates `com_mcpserver-<version>.zip` at the repository root. The version is read from `mcpserver.xml`.
+The build creates `pkg_mcpserver-<version>.zip` at the repository root, containing `com_mcpserver.zip` and `plg_system_mcpserver.zip`. The version is read from `mcpserver.xml` and written into the package and plugin manifests.
 
 ## Configuration
 
@@ -426,6 +429,45 @@ Disabling **Governed Mode** in **Options → Security Settings** is the rollback
 - **Restoring the site from a database backup:** because encrypted credential tokens are keyed on the credential salt (`#__extensions.params.credential_salt` for `com_mcpserver`) together with the Joomla application secret, restore both from the same backup as the `#__mcpserver_credential` table. Compare the recovery key fingerprint shown on **Manage Credentials** before and after the restore to confirm the salt was preserved; a changed fingerprint means every existing credential must be reissued.
 - **Joomla application secret rotated independently of a restore:** this also invalidates every existing credential's stored ciphertext, since the encryption key is derived from both the secret and the salt. Reissue credentials for every affected client after rotating the secret.
 
+## OAuth Sign-in
+
+MCP clients that support OAuth, such as ChatGPT and Claude on the web, can connect by signing in to the site instead of being given a bearer token. You give the client only the endpoint URL. The client registers itself, sends the user to the site to sign in and approve it, and then calls the server with short-lived access tokens.
+
+OAuth sign-in builds on [Governed Mode](#governed-mode-per-client-credentials) rather than replacing it. On the approval page, the user chooses one of their own active MCP credentials. The client then acts as that credential, with its Joomla user's permissions. Approval, expiry, revocation, the audit trail and Action Log attribution apply as they do for a credential bearer token. Revoking the credential, or switching OAuth off, ends the client's access on its next request.
+
+### Requirements
+
+- **Governed Mode** is on, and each user who will connect has claimed a credential.
+- The **System - MCP Server** plugin is enabled. It is part of the MCP Server for Joomla package, is enabled when the package is first installed, and does nothing while OAuth Sign-in is off. Clients look up OAuth at `/.well-known/oauth-authorization-server` on the site root, a URL a component cannot serve, so the plugin answers it.
+- **URL rewriting** sends unknown paths to Joomla, so that `/.well-known/...` reaches the plugin. Joomla's standard `.htaccess` on Apache and its documented `try_files` rule on nginx both do this. Without URL rewriting, the endpoints fall back to `index.php/mcp-oauth/...`, but the `/.well-known/` metadata still needs a web-server rule.
+- The site is reachable over **HTTPS** at its own domain root. On a site installed in a subdirectory (`https://example.com/joomla/`), clients look for `/.well-known/oauth-authorization-server/joomla` on the domain root, outside Joomla. Add a web-server rewrite from there to `/joomla/.well-known/oauth-authorization-server`.
+
+### Setup
+
+1. In **Options → Security Settings**, set **OAuth Sign-in** to *Yes* (it appears once Governed Mode is on).
+2. Set **Allowed Redirect Hosts** (recommended), for example `chatgpt.com` and `claude.ai`, plus `cursor:` or `vscode:` if desktop clients use those app schemes. With this set, clients can only register redirects to what it lists. Loopback redirects (`http://127.0.0.1:<port>`) used by desktop clients are always allowed. Left empty, any https host or app scheme can be registered, and the approval page is the only safeguard.
+3. Check discovery: `curl https://example.com/.well-known/oauth-authorization-server` should return JSON whose `issuer` is your site URL.
+4. In the MCP client, add the server by its endpoint URL, `https://example.com/index.php?option=com_mcpserver&task=rpc.handle`, and choose OAuth (or leave authentication on automatic). The client opens the site's sign-in page. Sign in with your Joomla account, choose a credential and approve.
+
+### How it works
+
+- An unauthenticated request to the MCP endpoint gets HTTP 401 with `WWW-Authenticate: Bearer resource_metadata="..."`, pointing at the Protected Resource Metadata (RFC 9728).
+- The authorisation server supports the authorisation code grant with PKCE (`S256` only), Dynamic Client Registration (RFC 7591), Client ID Metadata Documents (an https `client_id` whose JSON document the site fetches, caches for an hour, and checks like a registration), rotating refresh tokens, token revocation (RFC 7009), resource indicators (RFC 8707) and the `iss` response parameter (RFC 9207). The only scope is `mcp`.
+- The approval page uses Joomla's own login, so two-factor authentication and login plugins apply. Nothing is redirected back to a client before the user has signed in. The page shows the client's name as the client's own unverified claim, together with where it will send the user back to.
+- Client ID Metadata Documents are fetched only over https on port 443, from a host name that resolves to public addresses, with no redirects, a 5-second timeout and a 16 KB limit, so a `client_id` cannot be used to reach the server's internal network. The approval page names the host a document came from, which unlike the client's name is verified.
+- Only client registration is rate-limited (per IP, using the RPC limits). The token endpoint is not, because hosted clients call it for all their users from a few shared addresses.
+- Access tokens last an hour by default (**Access Token Lifetime**). Each refresh issues a new refresh token (**Refresh Token Lifetime**, 30 days by default). If an old refresh token or a used authorisation code is presented again, every token from that approval is revoked.
+- Codes, tokens and client secrets are stored only as SHA-256 hashes, in `#__mcpserver_oauth_*`. Registered clients that never complete a sign-in are removed after 30 days.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/.well-known/oauth-authorization-server` | Authorization Server Metadata (RFC 8414) |
+| `GET` | `/.well-known/oauth-protected-resource` | Protected Resource Metadata (RFC 9728); also at `index.php?option=com_mcpserver&task=oauth.resource` |
+| `GET`, `POST` | `/mcp-oauth/authorize` | Sign-in and approval page (redirects to `task=oauth.authorize`) |
+| `POST` | `/mcp-oauth/token` | Token endpoint |
+| `POST` | `/mcp-oauth/register` | Dynamic Client Registration (when **Allow Client Registration** is on) |
+| `POST` | `/mcp-oauth/revoke` | Token revocation |
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -463,7 +505,7 @@ For every revision:
 - A `tools/call` carrying `_meta.progressToken` receives `notifications/progress` on an event-stream response while it runs: page by page for tools that read many pages (SEO audit, internal-link check, custom module lists) and by stage for `install_extension`. A call that reports no progress still gets an ordinary JSON response. Closing the stream cancels the call at its next progress point — never after a change has been saved — and it is logged with status 499.
 - `completion/complete` is available whenever Enable Prompts or Enable Resources is on.
 
-Not implemented, all optional in the specification: OAuth authorization (clients authenticate with the bearer token or a Governed Mode credential), push change notifications, multi-round-trip input requests (no tool needs input from the client) and the tasks extension. These are planned. The deprecated logging, sampling and roots features will not be added.
+Authorisation is supported through [OAuth Sign-in](#oauth-sign-in), which needs Governed Mode. Not implemented, all optional in the specification: push change notifications, multi-round-trip input requests (no tool needs input from the client) and the tasks extension. These are planned. The deprecated logging, sampling and roots features will not be added.
 
 **Upgrading:** a bridge or `.mcpb` extension from 1.9.0 or earlier does not send the headers `2026-07-28` requires, so a client speaking that revision through it gets `-32020`. The exception is the `server/discover` probe that dual-era clients send first: without the header it is answered as a legacy request (`-32601`), so such a client falls back to `initialize` and keeps working in the older protocol. After upgrading the component, download the extension again (below) or replace your copy of `mcp-http-bridge.js`. Clients that use `initialize` keep working with the old bridge.
 

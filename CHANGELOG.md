@@ -4,6 +4,8 @@ All notable release changes for MCP Server for Joomla are recorded here.
 
 ## Unreleased
 
+- Added a **Permissions** tab to the component Options. The **Manage Own Credentials** and **View Credential Audit** actions could not be granted to any user group before, so the self-service Credentials page was only reachable for users with **Access Administration Interface** (`core.manage`).
+
 ## 1.12.0 - Unreleased
 
 - Added OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web. The client is given only the endpoint URL. It registers itself (Dynamic Client Registration) or identifies itself with a Client ID Metadata Document, the user signs in to the site and chooses one of their Governed Mode credentials, and the client then acts as that credential, with its approval, expiry, revocation and audit trail. Turn it on with **OAuth Sign-in** in Options → Security Settings (needs Governed Mode).

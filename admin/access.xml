@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <access component="com_mcpserver">
 	<section name="component">
-        <action name="core.admin" title="JACTION_ADMIN" description="JACTION_ADMIN_EMS_DESC" />
-        <action name="core.manage" title="JACTION_MANAGE" description="JACTION_MANAGE_EMS_DESC" />
+        <action name="core.admin" title="JACTION_ADMIN" />
+        <action name="core.options" title="JACTION_OPTIONS" />
+        <action name="core.manage" title="JACTION_MANAGE" />
         <action name="mcpserver.credential.self" title="COM_MCPSERVER_ACTION_CREDENTIAL_SELF" description="COM_MCPSERVER_ACTION_CREDENTIAL_SELF_DESC" />
         <action name="mcpserver.credential.audit" title="COM_MCPSERVER_ACTION_CREDENTIAL_AUDIT" description="COM_MCPSERVER_ACTION_CREDENTIAL_AUDIT_DESC" />
 	</section>

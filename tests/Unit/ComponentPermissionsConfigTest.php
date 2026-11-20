@@ -37,17 +37,62 @@ final class ComponentPermissionsConfigTest extends TestCase
         $this->assertSame('rules', (string) $field['validate']);
     }
 
-    public function testEveryDeclaredActionIsInTheComponentSection(): void
+    public function testComponentSectionDeclaresTheGrantableActions(): void
+    {
+        $actions = array_map(
+            static fn (\SimpleXMLElement $action): string => (string) $action['name'],
+            $this->componentActions()
+        );
+
+        $this->assertSame(
+            ['core.admin', 'core.options', 'core.manage', 'mcpserver.credential.self', 'mcpserver.credential.audit'],
+            $actions
+        );
+    }
+
+    /**
+     * The Permissions tab prints every action's title and description through
+     * Text::_(), so an undefined key shows up as raw text. Component keys must
+     * be defined in the component's language file; Joomla core keys (which
+     * cannot be checked here) are limited to an allow-list of ones known to
+     * exist in Joomla 4 and 5. Core actions get no description, as in core
+     * components.
+     */
+    public function testEveryActionLanguageKeyResolves(): void
+    {
+        $strings = parse_ini_file(__DIR__ . '/../../admin/language/en-GB/en-GB.com_mcpserver.ini');
+        $this->assertIsArray($strings);
+
+        $coreKeys = ['JACTION_ADMIN', 'JACTION_OPTIONS', 'JACTION_MANAGE'];
+
+        foreach ($this->componentActions() as $action) {
+            $name = (string) $action['name'];
+
+            foreach (['title', 'description'] as $attribute) {
+                if (!isset($action[$attribute])) {
+                    continue;
+                }
+
+                $key = (string) $action[$attribute];
+
+                if (str_starts_with($key, 'COM_MCPSERVER_')) {
+                    $this->assertArrayHasKey($key, $strings, "{$name} {$attribute} key {$key} is not defined");
+                } else {
+                    $this->assertSame('title', $attribute, "{$name} has a core-language description {$key}");
+                    $this->assertContains($key, $coreKeys, "{$name} uses unknown core key {$key}");
+                }
+            }
+        }
+    }
+
+    /**
+     * @return list<\SimpleXMLElement>
+     */
+    private function componentActions(): array
     {
         $access = simplexml_load_file(__DIR__ . '/../../admin/access.xml');
         $this->assertNotFalse($access);
 
-        $actions = array_map(
-            static fn (\SimpleXMLElement $action): string => (string) $action['name'],
-            $access->xpath('//section[@name="component"]/action')
-        );
-
-        $this->assertContains('mcpserver.credential.self', $actions);
-        $this->assertContains('mcpserver.credential.audit', $actions);
+        return $access->xpath('//section[@name="component"]/action');
     }
 }

@@ -233,7 +233,12 @@ trait OAuthHandlerTrait
         $app = Factory::getApplication();
         $app->setHeader('status', (string) $status, true);
 
-        $view = $this->getView('Authorize', 'html', 'Site', ['base_path' => $this->basePath]);
+        // An Administrator-namespace view, like every class a front-end request
+        // loads: the component is booted from the administrator provider, so
+        // front-end requests never rely on the Site namespace. Its templates
+        // are the site's; the path is explicit rather than the controller's
+        // basePath, which defaults to JPATH_COMPONENT (deprecated in Joomla 4.3).
+        $view = $this->getView('Authorize', 'html', 'Administrator', ['base_path' => JPATH_SITE . '/components/com_mcpserver']);
         $view->setLayout($layout);
         $view->oauth = $data;
         // setDocument() from Joomla 4.4; the public property before that.

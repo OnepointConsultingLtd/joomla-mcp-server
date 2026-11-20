@@ -8,7 +8,7 @@
 
 declare(strict_types=1);
 
-namespace Joomla\Component\Mcpserver\Site\View\Authorize;
+namespace Joomla\Component\Mcpserver\Administrator\View\Authorize;
 
 defined('_JEXEC') or die;
 

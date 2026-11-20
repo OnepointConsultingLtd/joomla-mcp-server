@@ -71,4 +71,30 @@ final class PackageManifestTest extends TestCase
         $this->assertStringContainsString('pkg_mcpserver-{version}.zip', $feed);
         $this->assertStringNotContainsString('com_mcpserver-{version}.zip', $feed);
     }
+
+    /**
+     * Joomla's installer copies a component's front-end files only from a
+     * top-level <files> element. A <files> nested in <site> is ignored, which
+     * left components/com_mcpserver/ uninstalled until 1.12.0 (the OAuth
+     * consent page then failed with "Layout error not found").
+     */
+    public function testComponentFrontEndFilesAreATopLevelFilesElement(): void
+    {
+        $component = self::manifest('mcpserver.xml');
+
+        $this->assertCount(0, $component->xpath('/extension/site'), 'Joomla ignores a <site> element; use a top-level <files folder="site">');
+        $this->assertCount(1, $component->xpath('/extension/files'));
+        $this->assertSame('site', (string) $component->files['folder']);
+
+        $folders = array_map('strval', iterator_to_array($component->files->folder, false));
+        $filenames = array_map('strval', iterator_to_array($component->files->filename, false));
+        foreach (['tmpl', 'language', 'src', 'services'] as $folder) {
+            $this->assertContains($folder, $folders);
+            $this->assertDirectoryExists(self::ROOT . '/site/' . $folder);
+        }
+        foreach (['icon.png', 'mcp-http-bridge.js'] as $filename) {
+            $this->assertContains($filename, $filenames);
+            $this->assertFileExists(self::ROOT . '/site/' . $filename);
+        }
+    }
 }

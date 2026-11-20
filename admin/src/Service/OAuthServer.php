@@ -33,6 +33,9 @@ final class OAuthServer
 {
     public const SCOPE = 'mcp';
 
+    /** The grants the token endpoint performs; see token(). */
+    private const SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
+
     private const CODE_TTL = 300;
 
     private const MAX_REDIRECT_URIS = 10;
@@ -91,7 +94,12 @@ final class OAuthServer
         if ($refusal !== null) {
             throw new OAuthError('invalid_client_metadata', $refusal);
         }
-        $grantTypes = (array) ($metadata['grant_types'] ?? ['authorization_code']);
+        // RFC 7591 §2 lets the server replace requested values: grants the
+        // client asks for but this server never performs are dropped.
+        $grantTypes = array_values(array_intersect(
+            (array) ($metadata['grant_types'] ?? ['authorization_code']),
+            self::SUPPORTED_GRANT_TYPES
+        ));
 
         $name = self::clientName($metadata);
 
@@ -519,19 +527,24 @@ final class OAuthServer
      * Why a client's grant_types and response_types (registered or in a
      * metadata document) are unacceptable, or null when they are fine.
      *
+     * The client must use the authorisation code flow. Other grants and
+     * response types it declares are ignored rather than refused: the token
+     * endpoint performs only SUPPORTED_GRANT_TYPES and the authorisation
+     * endpoint issues only codes, so a declared extra can never be used.
+     * Claude's metadata document, for one, also lists the JWT bearer grant.
+     *
      * @param array<string,mixed> $metadata
      */
     private static function flowRefusal(array $metadata): ?string
     {
         $grantTypes = $metadata['grant_types'] ?? ['authorization_code'];
-        if (!is_array($grantTypes) || !in_array('authorization_code', $grantTypes, true)
-            || array_diff($grantTypes, ['authorization_code', 'refresh_token']) !== []) {
-            return 'grant_types must include authorization_code and may add only refresh_token';
+        if (!is_array($grantTypes) || !array_is_list($grantTypes) || !in_array('authorization_code', $grantTypes, true)) {
+            return 'grant_types must include authorization_code';
         }
 
         $responseTypes = $metadata['response_types'] ?? ['code'];
-        if (!is_array($responseTypes) || array_values(array_unique($responseTypes)) !== ['code']) {
-            return 'response_types must be ["code"]';
+        if (!is_array($responseTypes) || !array_is_list($responseTypes) || !in_array('code', $responseTypes, true)) {
+            return 'response_types must include code';
         }
 
         return null;

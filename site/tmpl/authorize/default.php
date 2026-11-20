@@ -14,7 +14,7 @@ use Joomla\CMS\HTML\HTMLHelper;
 use Joomla\CMS\Language\Text;
 use Joomla\CMS\Uri\Uri;
 
-/** @var \Joomla\Component\Mcpserver\Site\View\Authorize\HtmlView $this */
+/** @var \Joomla\Component\Mcpserver\Administrator\View\Authorize\HtmlView $this */
 
 /** @var \Joomla\Component\Mcpserver\Administrator\Service\OAuthAuthorizationRequest $request */
 $request = $this->oauth['request'];

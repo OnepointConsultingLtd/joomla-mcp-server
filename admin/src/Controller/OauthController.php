@@ -8,12 +8,11 @@
 
 declare(strict_types=1);
 
-namespace Joomla\Component\Mcpserver\Site\Controller;
+namespace Joomla\Component\Mcpserver\Administrator\Controller;
 
 defined('_JEXEC') or die;
 
 use Joomla\CMS\MVC\Controller\BaseController;
-use Joomla\Component\Mcpserver\Administrator\Controller\OAuthHandlerTrait;
 
 /**
  * The OAuth authorisation server's oauth.* tasks; see OAuthHandlerTrait.

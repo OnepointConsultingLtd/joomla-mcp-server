@@ -65,11 +65,13 @@ final class OAuthServerTest extends TestCase
         $this->store->addCredential(self::CREDENTIAL, self::USER, 'selector-abcdefgh');
         $this->now = new DateTimeImmutable('2026-11-15 12:00:00', new DateTimeZone('UTC'));
         $this->fetcher = new FakeClientMetadataFetcher();
+        // Claude's published client metadata document, as served on 2026-11-20.
         $this->fetcher->documents[self::CIMD_CLIENT] = [
             'client_id' => self::CIMD_CLIENT,
             'client_name' => 'Claude',
+            'client_uri' => 'https://claude.ai',
             'redirect_uris' => [self::CIMD_REDIRECT],
-            'grant_types' => ['authorization_code', 'refresh_token'],
+            'grant_types' => ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:jwt-bearer'],
             'response_types' => ['code'],
             'token_endpoint_auth_method' => 'none',
         ];
@@ -252,6 +254,22 @@ final class OAuthServerTest extends TestCase
     {
         $this->assertOAuthError('invalid_client_metadata', fn () => $this->registerPublic(['grant_types' => ['client_credentials']]));
         $this->assertOAuthError('invalid_client_metadata', fn () => $this->registerPublic(['response_types' => ['token']]));
+        $this->assertOAuthError('invalid_client_metadata', fn () => $this->registerPublic(['grant_types' => 'authorization_code']));
+    }
+
+    /**
+     * RFC 7591 §2: the server may replace requested values. Grants it never
+     * performs are dropped from the registration instead of refusing it.
+     */
+    public function testRegistrationDropsGrantsTheServerDoesNotPerform(): void
+    {
+        $client = $this->registerPublic([
+            'grant_types' => ['authorization_code', 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'client_credentials'],
+            'response_types' => ['code', 'token'],
+        ]);
+
+        $this->assertSame(['authorization_code', 'refresh_token'], $client['grant_types']);
+        $this->assertSame(['code'], $client['response_types']);
     }
 
     public function testClientNameIsStrippedOfControlCharactersAndCapped(): void
@@ -617,6 +635,7 @@ final class OAuthServerTest extends TestCase
             'private key JWT' => [['token_endpoint_auth_method' => 'private_key_jwt']],
             'embedded secret' => [['client_secret' => 'oops']],
             'implicit grant' => [['response_types' => ['token']]],
+            'no code grant' => [['grant_types' => ['refresh_token', 'urn:ietf:params:oauth:grant-type:jwt-bearer']]],
         ];
     }
 

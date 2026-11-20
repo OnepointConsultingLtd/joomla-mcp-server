@@ -17,19 +17,22 @@
             <provider path="services/provider.php"/>
         </providers>
     </extension>
-    <site>
-        <namespace path="src">Joomla\Component\Mcpserver\Site</namespace>
-        <files folder="site">
-            <filename>mcpserver.php</filename>
-            <filename>router.php</filename>
-            <filename>mcp-http-bridge.js</filename>
-            <filename>icon.png</filename>
-            <folder>src</folder>
-            <folder>services</folder>
-            <folder>tmpl</folder>
-            <folder>language</folder>
-        </files>
-    </site>
+    <!--
+        The front-end files must be a top-level <files> element: Joomla's
+        installer reads only $manifest->files for them. Until 1.12.0 this block
+        was wrapped in <site>, which Joomla ignores, so components/com_mcpserver/
+        was never installed (no OAuth templates, icon or stdio bridge).
+    -->
+    <files folder="site">
+        <filename>mcpserver.php</filename>
+        <filename>router.php</filename>
+        <filename>mcp-http-bridge.js</filename>
+        <filename>icon.png</filename>
+        <folder>src</folder>
+        <folder>services</folder>
+        <folder>tmpl</folder>
+        <folder>language</folder>
+    </files>
 
     <scriptfile>script.php</scriptfile>
 

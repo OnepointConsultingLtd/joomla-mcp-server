@@ -12,7 +12,7 @@ defined('_JEXEC') or die;
 
 use Joomla\CMS\Language\Text;
 
-/** @var \Joomla\Component\Mcpserver\Site\View\Authorize\HtmlView $this */
+/** @var \Joomla\Component\Mcpserver\Administrator\View\Authorize\HtmlView $this */
 ?>
 <div class="com-mcpserver-oauth">
     <h1><?php echo Text::_('COM_MCPSERVER_OAUTH_ERROR_HEADING'); ?></h1>

@@ -61,4 +61,7 @@
         </field>
         <field name="metrics_retention_days" type="number" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="360" min="1" max="3650" step="1" />
     </fieldset>
+    <fieldset name="permissions" label="JCONFIG_PERMISSIONS_LABEL" description="JCONFIG_PERMISSIONS_DESC">
+        <field name="rules" type="rules" label="JCONFIG_PERMISSIONS_LABEL" component="com_mcpserver" section="component" filter="rules" validate="rules" />
+    </fieldset>
 </config>

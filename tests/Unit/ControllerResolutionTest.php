@@ -13,6 +13,7 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 defined('_JEXEC') or die;
 
 use Joomla\CMS\MVC\Controller\BaseController;
+use Joomla\Component\Mcpserver\Administrator\Service\ComponentTaskUrl;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -71,6 +72,9 @@ final class ControllerResolutionTest extends TestCase
                 }
             }
         }
+        // The MCP endpoint's task is built from a constant rather than written
+        // out, so the scan above cannot see where the code advertises it.
+        $tasks[ComponentTaskUrl::MCP_ENDPOINT] ??= 'admin/src/Service/ComponentTaskUrl.php';
         ksort($tasks);
 
         return $tasks;

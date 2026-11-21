@@ -33,9 +33,6 @@ final class OAuthConfig
     /** The endpoints the plugin answers under ENDPOINT_PREFIX. */
     public const ENDPOINTS = [OAuthEndpoints::AUTHORIZE, OAuthEndpoints::TOKEN, OAuthEndpoints::REGISTER, OAuthEndpoints::REVOKE];
 
-    /** The task that makes the site's front controller the MCP endpoint. */
-    private const MCP_ENDPOINT_TASK = 'rpc.handle';
-
     private const WELL_KNOWN = [
         '.well-known/oauth-authorization-server' => OAuthEndpoints::AUTHORIZATION_SERVER,
         '.well-known/oauth-protected-resource' => OAuthEndpoints::PROTECTED_RESOURCE,
@@ -137,13 +134,13 @@ final class OAuthConfig
 
     public function componentUrl(string $task): string
     {
-        return $this->siteRoot . 'index.php?' . self::taskQuery($task);
+        return ComponentTaskUrl::url($this->siteRoot, $task);
     }
 
     /** The MCP endpoint, used as the resource when a client names none. */
     public function defaultResource(): string
     {
-        return $this->componentUrl(self::MCP_ENDPOINT_TASK);
+        return ComponentTaskUrl::mcpEndpoint($this->siteRoot);
     }
 
     /**
@@ -169,7 +166,7 @@ final class OAuthConfig
         $rootPath = trim((string) parse_url($this->siteRoot, PHP_URL_PATH), '/');
         $frontController = ltrim($rootPath . '/index.php', '/');
         $url = rtrim($origin, '/') . '/';
-        $mcpEndpointQuery = '?' . self::taskQuery(self::MCP_ENDPOINT_TASK);
+        $mcpEndpointQuery = '?' . ComponentTaskUrl::query(ComponentTaskUrl::MCP_ENDPOINT);
 
         if ($path === $frontController) {
             return $url . $path . $mcpEndpointQuery;
@@ -180,12 +177,6 @@ final class OAuthConfig
         }
 
         return $url . $path;
-    }
-
-    /** The query string that runs one of the component's tasks. */
-    private static function taskQuery(string $task): string
-    {
-        return 'option=com_mcpserver&task=' . $task;
     }
 
     /**

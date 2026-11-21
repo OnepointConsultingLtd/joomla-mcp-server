@@ -20,6 +20,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthorizationHeader;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
+use Joomla\Component\Mcpserver\Administrator\Service\ComponentTaskUrl;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernedToolAuthorizer;
 use Joomla\Component\Mcpserver\Administrator\Service\HttpProgressSink;
@@ -130,7 +131,7 @@ trait RpcHandlerTrait
         header('Connection: keep-alive');
         header('X-Accel-Buffering: no');
 
-        $postUrl = Uri::root() . 'index.php?option=com_mcpserver&task=rpc.handle&sessionId=' . $sessionId;
+        $postUrl = ComponentTaskUrl::mcpEndpoint(Uri::root()) . '&sessionId=' . $sessionId;
 
         echo "event: endpoint\n";
         echo "data: " . $postUrl . "\n\n";

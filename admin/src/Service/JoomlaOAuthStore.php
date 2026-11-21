@@ -218,7 +218,7 @@ final class JoomlaOAuthStore implements OAuthStoreInterface
         $db->setQuery($query)->execute();
     }
 
-    public function findToken(string $tokenHash): ?OAuthTokenRecord
+    public function findToken(string $tokenHash): ?OAuthGrantTokenRecord
     {
         $db = $this->db;
         $query = $db->getQuery(true)
@@ -247,7 +247,7 @@ final class JoomlaOAuthStore implements OAuthStoreInterface
             return null;
         }
 
-        return new OAuthTokenRecord(
+        return new OAuthGrantTokenRecord(
             (int) $row['id'],
             (string) $row['type'],
             (int) $row['grant_id'],

@@ -17,7 +17,7 @@ use Psr\Log\LoggerInterface;
 /**
  * The machine-facing OAuth endpoints: token, registration, revocation and the
  * two metadata documents. The authorisation endpoint is not here, because it
- * is a page a person signs in to (see OAuthHandlerTrait::authorize()).
+ * is a page a person signs in to (see OauthController::authorize()).
  *
  * Served both by plg_system_mcpserver (at /.well-known/... and /mcp-oauth/...)
  * and by the component's oauth.* tasks, so both go through this one class.

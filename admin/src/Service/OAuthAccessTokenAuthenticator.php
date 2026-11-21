@@ -26,7 +26,7 @@ use DateTimeImmutable;
  * site's MCP endpoint in the site application, never at the administrator
  * endpoint, which no grant is issued for.
  */
-final class OAuthTokenAuthenticator
+final class OAuthAccessTokenAuthenticator
 {
     public const PREFIX = 'mcpat_';
 
@@ -51,7 +51,7 @@ final class OAuthTokenAuthenticator
         return str_starts_with($token, self::PREFIX);
     }
 
-    public function authenticate(string $token, DateTimeImmutable $now): OAuthTokenRecord
+    public function authenticate(string $token, DateTimeImmutable $now): OAuthGrantTokenRecord
     {
         if (preg_match('/^' . self::PREFIX . '[A-Za-z0-9_-]{43}$/D', $token) !== 1 || !$this->config->ownsResource($this->requestUrl)) {
             throw new \RuntimeException(self::FAILURE);
@@ -59,7 +59,7 @@ final class OAuthTokenAuthenticator
 
         $record = $this->store->findToken(OAuthServer::hash($token));
 
-        if ($record === null || $record->type !== OAuthTokenRecord::ACCESS || !$record->isLive($now)
+        if ($record === null || $record->type !== OAuthGrantTokenRecord::ACCESS || !$record->isLive($now)
             || !$this->config->ownsResource($record->resource)) {
             throw new \RuntimeException(self::FAILURE);
         }

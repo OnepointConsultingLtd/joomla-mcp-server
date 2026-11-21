@@ -15,8 +15,8 @@ defined('_JEXEC') or die;
 use DateTimeImmutable;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthClient;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthCodeRecord;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthGrantTokenRecord;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthStoreInterface;
-use Joomla\Component\Mcpserver\Administrator\Service\OAuthTokenRecord;
 
 /**
  * OAuthStoreInterface in memory, with credentials the tests control.
@@ -123,7 +123,7 @@ final class InMemoryOAuthStore implements OAuthStoreInterface
         $this->tokens[$id] = ['hash' => $tokenHash, 'grant_id' => $grantId, 'type' => $type, 'expires' => $expires, 'revoked' => null];
     }
 
-    public function findToken(string $tokenHash): ?OAuthTokenRecord
+    public function findToken(string $tokenHash): ?OAuthGrantTokenRecord
     {
         foreach ($this->tokens as $id => $token) {
             if ($token['hash'] !== $tokenHash) {
@@ -136,7 +136,7 @@ final class InMemoryOAuthStore implements OAuthStoreInterface
                 return null;
             }
 
-            return new OAuthTokenRecord(
+            return new OAuthGrantTokenRecord(
                 $id,
                 $token['type'],
                 $token['grant_id'],

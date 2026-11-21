@@ -26,7 +26,7 @@ use DateTimeImmutable;
  *
  * Every grant is bound to one Governed Mode credential chosen by its owner at
  * consent. Tokens carry no authority of their own: each use re-resolves that
- * credential (OAuthTokenAuthenticator), so revoking or expiring the credential
+ * credential (OAuthAccessTokenAuthenticator), so revoking or expiring the credential
  * ends every OAuth grant built on it.
  */
 final class OAuthServer
@@ -338,7 +338,7 @@ final class OAuthServer
         }
 
         $now = ($this->clock)();
-        if ($record->type === OAuthTokenRecord::REFRESH) {
+        if ($record->type === OAuthGrantTokenRecord::REFRESH) {
             $this->store->revokeGrant($record->grantId, $now);
         } else {
             $this->store->revokeToken($record->id, $now);
@@ -403,7 +403,7 @@ final class OAuthServer
         $token = self::stringParam($post, 'refresh_token');
         $record = $token === null ? null : $this->store->findToken(self::hash($token));
 
-        if ($record === null || $record->type !== OAuthTokenRecord::REFRESH || !hash_equals($record->clientId, $client->clientId)) {
+        if ($record === null || $record->type !== OAuthGrantTokenRecord::REFRESH || !hash_equals($record->clientId, $client->clientId)) {
             throw new OAuthError('invalid_grant', 'Invalid refresh token');
         }
 
@@ -443,11 +443,11 @@ final class OAuthServer
      */
     private function issueTokens(int $grantId, string $scope, DateTimeImmutable $now): array
     {
-        $access = OAuthTokenAuthenticator::PREFIX . self::random(32);
+        $access = OAuthAccessTokenAuthenticator::PREFIX . self::random(32);
         $refresh = 'mcprt_' . self::random(32);
 
-        $this->store->createToken($grantId, OAuthTokenRecord::ACCESS, self::hash($access), $now->modify('+' . $this->config->accessTokenTtl . ' seconds'), $now);
-        $this->store->createToken($grantId, OAuthTokenRecord::REFRESH, self::hash($refresh), $now->modify('+' . $this->config->refreshTokenTtl . ' seconds'), $now);
+        $this->store->createToken($grantId, OAuthGrantTokenRecord::ACCESS, self::hash($access), $now->modify('+' . $this->config->accessTokenTtl . ' seconds'), $now);
+        $this->store->createToken($grantId, OAuthGrantTokenRecord::REFRESH, self::hash($refresh), $now->modify('+' . $this->config->refreshTokenTtl . ' seconds'), $now);
 
         return [
             'access_token' => $access,

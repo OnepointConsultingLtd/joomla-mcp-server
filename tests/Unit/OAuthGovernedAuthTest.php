@@ -21,9 +21,9 @@ use Joomla\Component\Mcpserver\Administrator\Service\GovernedAuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernedCredentialAuthenticator;
 use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
 use Joomla\Component\Mcpserver\Administrator\Service\McpCredential;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthAccessTokenAuthenticator;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthServer;
-use Joomla\Component\Mcpserver\Administrator\Service\OAuthTokenAuthenticator;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -101,7 +101,7 @@ final class OAuthGovernedAuthTest extends TestCase
         $service = new GovernedAuthService(
             new GovernedCredentialAuthenticator($this->credentialStore, $this->cipher),
             FakeServerInput::withAuthorization($header),
-            $oauthEnabled ? new OAuthTokenAuthenticator($this->oauthStore, new OAuthConfig('https://example.com/'), $requestUrl) : null
+            $oauthEnabled ? new OAuthAccessTokenAuthenticator($this->oauthStore, new OAuthConfig('https://example.com/'), $requestUrl) : null
         );
 
         return $service->authenticate();
@@ -156,7 +156,7 @@ final class OAuthGovernedAuthTest extends TestCase
 
     public function testUnknownAccessTokenIsRefused(): void
     {
-        $result = $this->authenticate('Bearer ' . OAuthTokenAuthenticator::PREFIX . str_repeat('A', 43));
+        $result = $this->authenticate('Bearer ' . OAuthAccessTokenAuthenticator::PREFIX . str_repeat('A', 43));
 
         $this->assertSame(['error' => 'Invalid or expired OAuth access token', 'code' => JsonRpc::UNAUTHORIZED], $result);
     }

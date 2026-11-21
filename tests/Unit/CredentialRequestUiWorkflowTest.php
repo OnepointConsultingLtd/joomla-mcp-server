@@ -100,7 +100,7 @@ final class CredentialRequestUiWorkflowTest extends TestCase
     public function testConsentPageClaimsApprovedRequestsWithoutShowingABearerToken(): void
     {
         $template = $this->source('site/tmpl/authorize/default.php');
-        $controller = $this->source('admin/src/Controller/OAuthHandlerTrait.php');
+        $controller = $this->source('admin/src/Controller/OauthController.php');
 
         // One choice, either an existing credential or an approved request.
         $this->assertStringContainsString("'credential:' . (int) \$credential['id']", $template);

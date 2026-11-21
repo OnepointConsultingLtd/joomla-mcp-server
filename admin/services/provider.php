@@ -178,7 +178,7 @@ return new class implements ServiceProviderInterface {
                 // OAuth access tokens are accepted only while OAuth is switched
                 // on, so turning it off ends all OAuth access at once.
                 OAuthConfig::isEnabled($params)
-                    ? OAuthServiceFactory::tokenAuthenticator(Uri::getInstance()->toString(), $params)
+                    ? OAuthServiceFactory::accessTokenAuthenticator(Uri::getInstance()->toString(), $params)
                     : null
             );
         });

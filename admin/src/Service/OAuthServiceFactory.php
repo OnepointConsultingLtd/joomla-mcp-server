@@ -67,9 +67,9 @@ final class OAuthServiceFactory
     /**
      * @param string $requestUrl The URL the access token is being presented to.
      */
-    public static function tokenAuthenticator(string $requestUrl, ?Registry $params = null): OAuthTokenAuthenticator
+    public static function accessTokenAuthenticator(string $requestUrl, ?Registry $params = null): OAuthAccessTokenAuthenticator
     {
-        return new OAuthTokenAuthenticator(self::store(), self::config($params), $requestUrl);
+        return new OAuthAccessTokenAuthenticator(self::store(), self::config($params), $requestUrl);
     }
 
     private static function store(): JoomlaOAuthStore

@@ -18,7 +18,7 @@ use DateTimeImmutable;
  * An issued access or refresh token, joined with the grant it belongs to and
  * the Governed Mode credential that grant is bound to.
  */
-final class OAuthTokenRecord
+final class OAuthGrantTokenRecord
 {
     public const ACCESS = 'access';
     public const REFRESH = 'refresh';

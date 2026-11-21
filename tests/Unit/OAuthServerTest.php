@@ -15,11 +15,11 @@ defined('_JEXEC') or die;
 use DateTimeImmutable;
 use DateTimeZone;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialClaimRefusedException;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthAccessTokenAuthenticator;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthClientMetadataFetcher;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthError;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthServer;
-use Joomla\Component\Mcpserver\Administrator\Service\OAuthTokenAuthenticator;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -84,9 +84,9 @@ final class OAuthServerTest extends TestCase
         return new OAuthServer($this->store, $config, fn (): DateTimeImmutable => $this->now, $this->fetcher, $claims);
     }
 
-    private function authenticator(): OAuthTokenAuthenticator
+    private function authenticator(): OAuthAccessTokenAuthenticator
     {
-        return new OAuthTokenAuthenticator($this->store, new OAuthConfig(self::SITE), self::SITE . 'index.php?option=com_mcpserver&task=rpc.handle');
+        return new OAuthAccessTokenAuthenticator($this->store, new OAuthConfig(self::SITE), self::SITE . 'index.php?option=com_mcpserver&task=rpc.handle');
     }
 
     private static function challenge(string $verifier = self::VERIFIER): string
@@ -516,7 +516,7 @@ final class OAuthServerTest extends TestCase
         $tokens = $this->obtainTokens();
 
         $this->assertSame('Bearer', $tokens['token_type']);
-        $this->assertStringStartsWith(OAuthTokenAuthenticator::PREFIX, $tokens['access_token']);
+        $this->assertStringStartsWith(OAuthAccessTokenAuthenticator::PREFIX, $tokens['access_token']);
         $this->assertStringStartsWith('mcprt_', $tokens['refresh_token']);
         $this->assertSame(3600, $tokens['expires_in']);
         $this->assertSame('mcp', $tokens['scope']);
@@ -772,7 +772,7 @@ final class OAuthServerTest extends TestCase
             'code_verifier' => self::VERIFIER,
         ], '');
 
-        $this->assertStringStartsWith(OAuthTokenAuthenticator::PREFIX, $tokens['access_token']);
+        $this->assertStringStartsWith(OAuthAccessTokenAuthenticator::PREFIX, $tokens['access_token']);
     }
 
     /** @return array<string,string> */

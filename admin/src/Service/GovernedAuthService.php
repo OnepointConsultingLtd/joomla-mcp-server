@@ -32,7 +32,7 @@ final class GovernedAuthService
     public function __construct(
         private GovernedCredentialAuthenticator $authenticator,
         private object $server,
-        private ?OAuthTokenAuthenticator $oauthAuthenticator = null,
+        private ?OAuthAccessTokenAuthenticator $oauthAuthenticator = null,
     ) {
     }
 
@@ -52,7 +52,7 @@ final class GovernedAuthService
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $token = AuthorizationHeader::bearerToken($header) ?? '';
 
-        if ($this->oauthAuthenticator !== null && OAuthTokenAuthenticator::isAccessToken($token)) {
+        if ($this->oauthAuthenticator !== null && OAuthAccessTokenAuthenticator::isAccessToken($token)) {
             return $this->authenticateOAuth($token, $now);
         }
 
@@ -72,12 +72,12 @@ final class GovernedAuthService
             $grant = $this->oauthAuthenticator->authenticate($token, $now);
             $principal = $this->authenticator->authenticateBoundCredential($grant->credentialSelector, $now);
         } catch (\RuntimeException) {
-            return ['error' => OAuthTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
+            return ['error' => OAuthAccessTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
         }
 
         // The grant recorded who consented; the credential must still be theirs.
         if ($principal->userId !== $grant->userId || $principal->credentialId !== $grant->credentialId) {
-            return ['error' => OAuthTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
+            return ['error' => OAuthAccessTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
         }
 
         return $principal;

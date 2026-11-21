@@ -53,7 +53,7 @@ interface OAuthStoreInterface
 
     public function createToken(int $grantId, string $type, string $tokenHash, DateTimeImmutable $expires, DateTimeImmutable $now): void;
 
-    public function findToken(string $tokenHash): ?OAuthTokenRecord;
+    public function findToken(string $tokenHash): ?OAuthGrantTokenRecord;
 
     /**
      * Revokes one token. Must be atomic.

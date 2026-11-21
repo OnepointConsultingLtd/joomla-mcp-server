@@ -154,6 +154,7 @@ final class OAuthConfigTest extends TestCase
 
         $this->assertSame($linkQuery['resource'], $config->resourceForWellKnownPath('https://example.com', 'index.php'));
         $this->assertSame($config->defaultResource(), $config->resourceForWellKnownPath('https://example.com/', '/index.php'));
+        $this->assertSame($connectedTo, $config->defaultResource());
     }
 
     public function testLoopbackRedirectsMatchAcrossPortsButNothingElseDoes(): void

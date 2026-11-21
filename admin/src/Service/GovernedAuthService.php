@@ -14,6 +14,7 @@ defined('_JEXEC') or die;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Joomla\Input\Input;
 
 /**
  * Authenticates governed-mode MCP requests using stored credentials instead
@@ -27,11 +28,11 @@ use DateTimeZone;
 final class GovernedAuthService
 {
     /**
-     * @param object $server The request's server input (`$app->input->server`), read via AuthorizationHeader.
+     * @param Input $server The request's server input (`$app->input->server`), read via AuthorizationHeader.
      */
     public function __construct(
         private GovernedCredentialAuthenticator $authenticator,
-        private object $server,
+        private Input $server,
         private ?OAuthAccessTokenAuthenticator $oauthAuthenticator = null,
     ) {
     }

@@ -12,11 +12,13 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 
 defined('_JEXEC') or die;
 
+use Joomla\Input\Input;
+
 /**
  * Stands in for the request's server input (`$app->input->server`), which
  * AuthorizationHeader reads through getString().
  */
-final class FakeServerInput
+final class FakeServerInput extends Input
 {
     /** @var array<string,int> How many times each variable was read. */
     public array $reads = [];

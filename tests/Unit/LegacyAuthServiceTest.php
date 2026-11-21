@@ -15,6 +15,7 @@ defined('_JEXEC') or die;
 use Joomla\CMS\Factory;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
+use Joomla\Input\Input;
 use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 
@@ -43,21 +44,11 @@ final class LegacyAuthServiceTest extends TestCase
             public function __construct(array $server)
             {
                 $this->input = new class ($server) {
-                    public object $server;
+                    public Input $server;
 
                     public function __construct(array $values)
                     {
-                        $this->server = new class ($values) {
-                            /** @param array<string,string> $values */
-                            public function __construct(private array $values)
-                            {
-                            }
-
-                            public function getString(string $name, string $default = ''): string
-                            {
-                                return $this->values[$name] ?? $default;
-                            }
-                        };
+                        $this->server = new FakeServerInput($values);
                     }
                 };
             }

@@ -12,6 +12,7 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 
 defined('_JEXEC') or die;
 
+use Joomla\CMS\User\User;
 use Joomla\Component\Mcpserver\Administrator\Service\ComponentOptionsAccess;
 use PHPUnit\Framework\TestCase;
 
@@ -25,17 +26,17 @@ final class ComponentOptionsAccessTest extends TestCase
     /**
      * @param list<string> $granted Actions the user holds on com_mcpserver.
      */
-    private static function user(array $granted): object
+    private static function user(array $granted): User
     {
-        return new class ($granted) {
+        return new class ($granted) extends User {
             /** @param list<string> $granted */
             public function __construct(private array $granted)
             {
             }
 
-            public function authorise(string $action, ?string $asset = null): bool
+            public function authorise($action, $assetname = null): bool
             {
-                return $asset === 'com_mcpserver' && in_array($action, $this->granted, true);
+                return $assetname === 'com_mcpserver' && in_array($action, $this->granted, true);
             }
         };
     }

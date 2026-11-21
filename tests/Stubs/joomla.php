@@ -820,6 +820,42 @@ namespace Joomla\CMS\MVC\Controller {
     }
 }
 
+namespace Joomla\Input {
+    if (!class_exists(Input::class)) {
+        /**
+         * Stands in for Joomla's request input, so code typed against it can
+         * be given test fakes. Its typed getters (getString() and the rest)
+         * are magic in Joomla, so they are not declared here: each fake
+         * declares the ones it reads.
+         *
+         * @method string getString(string $name, string $default = '')
+         */
+        class Input
+        {
+            public function __construct($source = null, array $options = [])
+            {
+            }
+        }
+    }
+}
+
+namespace Joomla\CMS\User {
+    if (!class_exists(User::class)) {
+        /**
+         * Stands in for Joomla's CMS user, so code typed against it can be
+         * given test fakes. authorise() keeps Joomla's untyped signature, so a
+         * fake's override stays compatible with the real class.
+         */
+        class User
+        {
+            public function authorise($action, $assetname = null)
+            {
+                return false;
+            }
+        }
+    }
+}
+
 namespace {
     if (!class_exists('JLoader')) {
         class JLoader

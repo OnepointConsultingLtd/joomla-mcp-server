@@ -12,6 +12,8 @@ namespace Joomla\Component\Mcpserver\Administrator\Service;
 
 defined('_JEXEC') or die;
 
+use Joomla\CMS\User\User;
+
 /**
  * Who may open the component's Options (com_config).
  *
@@ -24,10 +26,7 @@ final class ComponentOptionsAccess
 {
     private const COMPONENT = 'com_mcpserver';
 
-    /**
-     * @param object|null $user A Joomla\CMS\User\User; only authorise() is used.
-     */
-    public static function allows(?object $user): bool
+    public static function allows(?User $user): bool
     {
         return $user !== null
             && ($user->authorise('core.admin', self::COMPONENT) || $user->authorise('core.options', self::COMPONENT));

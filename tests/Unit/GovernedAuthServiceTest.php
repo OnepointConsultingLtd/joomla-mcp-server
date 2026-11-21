@@ -24,6 +24,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\{
     JsonRpc,
     McpCredential,
 };
+use Joomla\Input\Input;
 use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 
@@ -188,16 +189,11 @@ final class GovernedAuthServiceTest extends TestCase
             public function __construct()
             {
                 $this->input = new class {
-                    public object $server;
+                    public Input $server;
 
                     public function __construct()
                     {
-                        $this->server = new class {
-                            public function getString(string $name, string $default = ''): string
-                            {
-                                return $default;
-                            }
-                        };
+                        $this->server = new FakeServerInput();
                     }
                 };
             }

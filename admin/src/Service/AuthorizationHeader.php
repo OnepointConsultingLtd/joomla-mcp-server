@@ -12,6 +12,8 @@ namespace Joomla\Component\Mcpserver\Administrator\Service;
 
 defined('_JEXEC') or die;
 
+use Joomla\Input\Input;
+
 /**
  * The one place that reads the request's Authorization header and takes the
  * bearer token out of it. The shared bearer token, credential bearer tokens
@@ -27,10 +29,9 @@ final class AuthorizationHeader
     private const BEARER_PREFIX = 'Bearer ';
 
     /**
-     * @param object $server The request's server input (`$app->input->server`,
-     *                       a Joomla\Input\Input); only getString() is used.
+     * @param Input $server The request's server input (`$app->input->server`).
      */
-    public static function read(object $server): string
+    public static function read(Input $server): string
     {
         return $server->getString('HTTP_AUTHORIZATION', '')
             ?: $server->getString('REDIRECT_HTTP_AUTHORIZATION', '');
@@ -40,7 +41,7 @@ final class AuthorizationHeader
      * The token from the request's `Authorization: Bearer <token>` header, or
      * null when there is none.
      */
-    public static function bearerTokenFrom(object $server): ?string
+    public static function bearerTokenFrom(Input $server): ?string
     {
         return self::bearerToken(self::read($server));
     }

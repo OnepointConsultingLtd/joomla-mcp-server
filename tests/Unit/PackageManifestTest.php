@@ -73,6 +73,27 @@ final class PackageManifestTest extends TestCase
     }
 
     /**
+     * Joomla keeps one update per feed, whatever its <element>: the highest
+     * version, and of equal versions the first one read. If the package entry
+     * for the migration release came first, a site with just the component
+     * installed would never be offered it.
+     */
+    public function testComponentMigrationEntryPrecedesThePackageEntry(): void
+    {
+        $entries = [];
+        foreach (self::manifest('update.xml')->update as $update) {
+            $entries[] = (string) $update->element . '@' . (string) $update->version;
+        }
+
+        $component = array_search('com_mcpserver@1.12.0', $entries, true);
+        $package = array_search('pkg_mcpserver@1.12.0', $entries, true);
+
+        $this->assertNotFalse($component);
+        $this->assertNotFalse($package);
+        $this->assertLessThan($package, $component);
+    }
+
+    /**
      * Joomla's installer copies a component's front-end files only from a
      * top-level <files> element. A <files> nested in <site> is ignored, which
      * left components/com_mcpserver/ uninstalled until 1.12.0 (the OAuth

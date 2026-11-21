@@ -385,9 +385,8 @@ Before cutover, for every group that will hold a credential:
 
 1. Go to **System → Plugins → User - Joomla API Token** and make sure it is enabled.
 2. Add those user groups to **Allowed User Groups**, and save.
-3. Each user opens their account (**User Menu → Edit Account**, or **Users → Manage → [their account]**), goes to the **API Tokens** tab, sets **Token Enabled** to *Yes*, and saves.
 
-Nobody copies or pastes the token. When the user claims, the component works out their current token from their account, stores it encrypted, and never displays it.
+Users don't need to do anything with their tokens. When a user claims, the component works out their current token from their account, stores it encrypted, and never displays it. A user who has never had a token gets one created at claim, exactly as Joomla would create it when they save their profile; it then appears on the **API Tokens** tab of their account like any other. A user who has switched their token off must switch it back on before claiming: the component never re-enables it for them.
 
 You do not have to work this out in advance: if a requester's group has no route to an API token, the **Pending credential requests** queue says so on that request, names the groups to add, and distinguishes a group restriction from the plugin being disabled outright. A request flagged this way can be approved, but never claimed, until the plugin setting is changed.
 
@@ -433,11 +432,11 @@ Disabling **Governed Mode** in **Options → Security Settings** is the rollback
 
 MCP clients that support OAuth, such as ChatGPT and Claude on the web, can connect by signing in to the site instead of being given a bearer token. You give the client only the endpoint URL. The client registers itself, sends the user to the site to sign in and approve it, and then calls the server with short-lived access tokens.
 
-OAuth sign-in builds on [Governed Mode](#governed-mode-per-client-credentials) rather than replacing it. On the approval page, the user chooses one of their own active MCP credentials. The client then acts as that credential, with its Joomla user's permissions. Approval, expiry, revocation, the audit trail and Action Log attribution apply as they do for a credential bearer token. Revoking the credential, or switching OAuth off, ends the client's access on its next request.
+OAuth sign-in builds on [Governed Mode](#governed-mode-per-client-credentials) rather than replacing it. On the approval page, the user chooses one of their own active MCP credentials, or one of their approved credential requests: choosing a request claims it there and then, so the user never handles a bearer token. The client then acts as that credential, with its Joomla user's permissions. Approval, expiry, revocation, the audit trail and Action Log attribution apply as they do for a credential bearer token. Revoking the credential, or switching OAuth off, ends the client's access on its next request.
 
 ### Requirements
 
-- **Governed Mode** is on, and each user who will connect has claimed a credential.
+- **Governed Mode** is on, and each user who will connect has a credential or an approved credential request. An approved request can be claimed on the approval page itself.
 - The **System - MCP Server** plugin is enabled. It is part of the MCP Server for Joomla package, is enabled when the package is first installed, and does nothing while OAuth Sign-in is off. Clients look up OAuth at `/.well-known/oauth-authorization-server` on the site root, a URL a component cannot serve, so the plugin answers it.
 - **URL rewriting** sends unknown paths to Joomla, so that `/.well-known/...` reaches the plugin. Joomla's standard `.htaccess` on Apache and its documented `try_files` rule on nginx both do this. Without URL rewriting, the endpoints fall back to `index.php/mcp-oauth/...`, but the `/.well-known/` metadata still needs a web-server rule.
 - The site is reachable over **HTTPS** at its own domain root. On a site installed in a subdirectory (`https://example.com/joomla/`), clients look for `/.well-known/oauth-authorization-server/joomla` on the domain root, outside Joomla. Add a web-server rewrite from there to `/joomla/.well-known/oauth-authorization-server`.

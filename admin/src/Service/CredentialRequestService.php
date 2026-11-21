@@ -24,6 +24,7 @@ final class CredentialRequestService
         private readonly CredentialRequestStoreInterface $store,
         private readonly CredentialCipher $cipher,
         private readonly JoomlaApiTokenOwnershipValidator $tokenValidator,
+        private readonly JoomlaApiTokenProvisioner $tokenProvisioner,
         private $clock,
     ) {
     }
@@ -76,29 +77,52 @@ final class CredentialRequestService
         $this->store->decide($request['id'], 'rejected', $actorId, null, $this->now());
     }
 
+    /**
+     * The owner's requests that claim() would accept right now: approved, not
+     * yet claimed, and not past the expiry the approver set.
+     *
+     * @return list<array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string,username:?string,user_name:?string}>
+     */
+    public function listClaimable(int $userId): array
+    {
+        $now = $this->now();
+
+        return array_values(array_filter(
+            $this->listForUser($userId),
+            static fn (array $request): bool => $request['status'] === 'approved'
+                && $request['user_id'] === $userId
+                && !self::approvalHasExpired($request, $now)
+        ));
+    }
+
     /** @return array{id:string,bearer_token:string} */
     public function claim(string $id, int $userId, string $userName): array
     {
         $request = $this->store->find($id);
         $now = $this->now();
         if ($request === null || $request['status'] !== 'approved' || $request['user_id'] !== $userId) {
-            throw new \RuntimeException('Credential request is not available to claim');
+            throw new CredentialClaimRefusedException('Credential request is not available to claim');
         }
-        // credential_expires === 0 means the approver granted a credential that
-        // never expires (stored as SQL NULL); only a real timestamp in the past
-        // makes the request unclaimable. The request's own status separates
-        // that from "not decided yet", which is also 0.
         $neverExpires = $request['credential_expires'] === 0;
 
-        if ((!$neverExpires && $request['credential_expires'] <= $now) || trim($userName) === '') {
-            throw new \InvalidArgumentException('Credential request has expired or owner name is blank');
+        if (self::approvalHasExpired($request, $now) || trim($userName) === '') {
+            throw new CredentialClaimRefusedException('Credential request has expired or owner name is blank');
         }
         // The owner never handles the token: it is worked out from their own
         // account, so it cannot be someone else's or the shared one.
         $derived = $this->tokenValidator->currentToken($userId);
+        if ($derived['reason'] === JoomlaApiTokenOwnershipValidator::REASON_NO_SEED) {
+            // An owner who never had a token gets one, as Joomla would give
+            // them on saving their profile, if Joomla allows them one at all.
+            $provisioned = $this->tokenProvisioner->provision($userId);
+            if ($provisioned !== JoomlaApiTokenProvisioner::OK) {
+                throw new CredentialClaimRefusedException(self::tokenRejectionMessage($provisioned));
+            }
+            $derived = $this->tokenValidator->currentToken($userId);
+        }
         if ($derived['token'] === null) {
             // Say which account problem it is: they have entirely different fixes.
-            throw new \RuntimeException(self::tokenRejectionMessage($derived['reason']));
+            throw new CredentialClaimRefusedException(self::tokenRejectionMessage($derived['reason']));
         }
         $apiToken = $derived['token'];
 
@@ -134,13 +158,27 @@ final class CredentialRequestService
         return $request;
     }
 
+    /**
+     * credential_expires === 0 means the approver granted a credential that
+     * never expires (stored as SQL NULL); only a real timestamp in the past
+     * makes an approved request unclaimable. The request's own status
+     * separates that from "not decided yet", which is also 0.
+     *
+     * @param array{credential_expires:int} $request
+     */
+    private static function approvalHasExpired(array $request, int $now): bool
+    {
+        return $request['credential_expires'] !== 0 && $request['credential_expires'] <= $now;
+    }
+
     private function now(): int
     {
         return (int) ($this->clock)();
     }
 
     /**
-     * Map a validator reason code to an actionable message.
+     * Map a reason from the token validator or provisioner to an actionable
+     * message.
      *
      * Plain English rather than language keys: this service is also reachable
      * outside an administrator request, and the controller renders whatever the
@@ -152,11 +190,19 @@ final class CredentialRequestService
             JoomlaApiTokenOwnershipValidator::REASON_NOT_ENABLED =>
                 'Your account\'s Joomla API token is disabled. Enable it under '
                 . 'Users -> Manage -> [your account] -> API Tokens, then claim again.',
+            JoomlaApiTokenProvisioner::REASON_GROUP_NOT_ALLOWED =>
+                'Your user group is not allowed to hold a Joomla API token, so this credential cannot be claimed yet. '
+                . 'A Super User must add your group to System -> Plugins -> "User - Joomla API Token" -> '
+                . 'Allowed User Groups; by default only Super Users are permitted.',
+            JoomlaApiTokenProvisioner::REASON_PLUGIN_DISABLED =>
+                'Joomla API tokens are not available on this site, so this credential cannot be claimed yet. '
+                . 'A Super User must make sure the "User - Joomla API Token" plugin is installed and enabled '
+                . 'under System -> Plugins.',
+            // Only reachable when a seed exists but cannot be read: an owner
+            // with no seed at all has one created, or is told why not.
             JoomlaApiTokenOwnershipValidator::REASON_NO_SEED =>
-                'Your account has no Joomla API token yet. Open your account and use the API Tokens tab to create one, '
-                . 'then claim again. If that tab is missing, a Super User must add your user group to the '
-                . '"User - Joomla API Token" plugin under System -> Plugins -> Allowed User Groups; by default only '
-                . 'Super Users are permitted.',
+                'Your account\'s Joomla API token could not be read. Reset it under '
+                . 'Users -> Manage -> [your account] -> API Tokens, then claim again.',
             JoomlaApiTokenOwnershipValidator::REASON_ALGORITHM =>
                 'This site\'s "User - Joomla API Token" plugin is set to an HMAC algorithm Joomla does not accept. '
                 . 'A Super User must set it to sha256 or sha512.',

@@ -40,6 +40,9 @@ final class InMemoryOAuthStore implements OAuthStoreInterface
 
     public int $purges = 0;
 
+    /** Makes createGrant() fail, as a database error would. */
+    public bool $failGrants = false;
+
     public function addCredential(int $id, int $userId, string $selector, string $name = 'Laptop'): void
     {
         $this->credentials[$id] = ['id' => $id, 'user_id' => $userId, 'name' => $name, 'selector' => $selector, 'usable' => true];
@@ -66,6 +69,9 @@ final class InMemoryOAuthStore implements OAuthStoreInterface
 
     public function createGrant(string $clientId, int $userId, int $credentialId, string $scope, string $resource, DateTimeImmutable $now): int
     {
+        if ($this->failGrants) {
+            throw new \RuntimeException('database is down');
+        }
         $id = count($this->grants) + 1;
         $this->grants[$id] = [
             'client_id' => $clientId,

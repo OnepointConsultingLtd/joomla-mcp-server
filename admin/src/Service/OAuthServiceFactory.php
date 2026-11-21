@@ -49,13 +49,18 @@ final class OAuthServiceFactory
         );
     }
 
-    public static function server(?Registry $params = null): OAuthServer
+    /**
+     * @param OAuthCredentialClaimsInterface|null $claims Lets the consent page claim
+     *        approved credential requests; only the authorisation endpoint needs it.
+     */
+    public static function server(?Registry $params = null, ?OAuthCredentialClaimsInterface $claims = null): OAuthServer
     {
         return new OAuthServer(
             self::store(),
             self::config($params),
             static fn (): DateTimeImmutable => new DateTimeImmutable('now', new DateTimeZone('UTC')),
-            new HttpClientMetadataFetcher()
+            new HttpClientMetadataFetcher(),
+            $claims
         );
     }
 

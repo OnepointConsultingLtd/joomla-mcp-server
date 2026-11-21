@@ -59,6 +59,7 @@ final class OAuthServer
         private readonly OAuthConfig $config,
         callable $clock,
         private readonly ?OAuthClientMetadataFetcher $metadataFetcher = null,
+        private readonly ?OAuthCredentialClaimsInterface $claims = null,
     ) {
         $this->clock = $clock;
         $this->redirectPolicy = new OAuthRedirectUriPolicy($config->allowedRedirectHosts);
@@ -211,6 +212,12 @@ final class OAuthServer
             throw new OAuthError('invalid_request', 'Choose one of your active MCP credentials');
         }
 
+        return $this->authorise($request, $userId, $credentialId);
+    }
+
+    /** Records the grant and returns the URL that delivers its code. */
+    private function authorise(OAuthAuthorizationRequest $request, int $userId, int $credentialId): string
+    {
         $now = ($this->clock)();
         $this->store->purge($now);
 
@@ -219,6 +226,58 @@ final class OAuthServer
         $this->store->createCode($grantId, self::hash($code), $request->redirectUri, $request->codeChallenge, $now->modify('+' . self::CODE_TTL . ' seconds'));
 
         return $this->redirectWith($request->redirectUri, ['code' => $code, 'state' => $request->state]);
+    }
+
+    /**
+     * The user's approved credential requests they could claim at consent.
+     * Empty when this server was built without the credential workflow.
+     *
+     * @return list<array{id:string,name:string,expires:?DateTimeImmutable}>
+     */
+    public function claimableRequests(int $userId): array
+    {
+        return $this->claims?->claimable($userId) ?? [];
+    }
+
+    /**
+     * Claims one of the user's approved credential requests and records an
+     * OAuth grant bound to the credential that creates, in one step. The new
+     * credential's bearer token is never shown: the client signs in with OAuth.
+     *
+     * If anything fails after the claim, the new credential is revoked, so no
+     * credential nobody has seen is left able to authenticate.
+     */
+    public function approveByClaiming(OAuthAuthorizationRequest $request, int $userId, string $userName, string $credentialRequestId): string
+    {
+        $claimable = array_column($this->claimableRequests($userId), 'id');
+        if ($this->claims === null || !in_array($credentialRequestId, $claimable, true)) {
+            throw new OAuthError('invalid_request', 'Choose one of your approved credential requests');
+        }
+
+        try {
+            $credentialId = $this->claims->claim($credentialRequestId, $userId, $userName);
+        } catch (CredentialClaimRefusedException $e) {
+            // Only refusals carry a message meant for the owner; anything
+            // else (a database fault, say) propagates and is not shown.
+            throw new OAuthError('invalid_request', $e->getMessage());
+        }
+
+        try {
+            return $this->authorise($request, $userId, $credentialId);
+        } catch (\Throwable $e) {
+            try {
+                $this->claims->revoke($credentialId, $userId);
+            } catch (\Throwable $undoFailure) {
+                // Never let the second failure hide which credential is left over.
+                throw new \RuntimeException(
+                    "Sign-in failed after claiming credential {$credentialId}, and that credential could not be revoked: "
+                    . $undoFailure->getMessage(),
+                    0,
+                    $e
+                );
+            }
+            throw $e;
+        }
     }
 
     public function denyRedirect(OAuthAuthorizationRequest $request): string

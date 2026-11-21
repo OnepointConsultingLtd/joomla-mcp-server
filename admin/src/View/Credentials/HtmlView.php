@@ -24,6 +24,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialRequestService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceSetupService;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 
 /**
  * Self-service credential request and lifecycle view. Users request access,
@@ -54,6 +55,9 @@ class HtmlView extends BaseHtmlView
 
     /** @var array{id:string,bearer_token:string}|null */
     public $justIssued = null;
+
+    /** Whether MCP clients can sign in with OAuth, which makes a bearer token unnecessary for them. */
+    public bool $oauthEnabled = false;
 
     /**
      * True once CredentialLifecycleService can be resolved, i.e. a valid
@@ -228,6 +232,7 @@ class HtmlView extends BaseHtmlView
         // rendered: the plaintext bearer token exists nowhere else, so clearing
         // it on a page that cannot display it destroys it permanently.
         $this->justIssued = $app->getUserState('com_mcpserver.credentials.issued');
+        $this->oauthEnabled = OAuthConfig::isEnabled(ComponentHelper::getParams('com_mcpserver'));
 
         if ($this->justIssued !== null && $this->governedConfigured) {
             $app->setUserState('com_mcpserver.credentials.issued', null);

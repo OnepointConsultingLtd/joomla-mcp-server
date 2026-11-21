@@ -50,6 +50,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthServiceFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenOwnershipValidator;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenProvisioner;
 use Joomla\Component\Mcpserver\Administrator\Service\McpbService;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
@@ -136,11 +137,22 @@ return new class implements ServiceProviderInterface {
             );
         });
 
+        // Creates a Joomla API token seed at claim for an owner who has none,
+        // only where plg_user_token would let them hold one.
+        $container->share(JoomlaApiTokenProvisioner::class, function (Container $container) {
+            return new JoomlaApiTokenProvisioner(
+                Factory::getDbo(),
+                $container->get(JoomlaApiTokenAvailability::class),
+                static fn (int $length): string => random_bytes($length)
+            );
+        });
+
         $container->share(CredentialRequestService::class, function (Container $container) {
             return new CredentialRequestService(
                 $container->get(JoomlaCredentialRequestStore::class),
                 $container->get(CredentialCipher::class),
                 $container->get(JoomlaApiTokenOwnershipValidator::class),
+                $container->get(JoomlaApiTokenProvisioner::class),
                 static fn (): int => time()
             );
         });

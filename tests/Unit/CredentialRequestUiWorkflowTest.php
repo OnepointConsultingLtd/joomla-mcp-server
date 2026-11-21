@@ -97,6 +97,20 @@ final class CredentialRequestUiWorkflowTest extends TestCase
         $this->assertStringNotContainsString("'api_token'", $this->source('admin/src/Controller/CredentialsController.php'));
     }
 
+    public function testConsentPageClaimsApprovedRequestsWithoutShowingABearerToken(): void
+    {
+        $template = $this->source('site/tmpl/authorize/default.php');
+        $controller = $this->source('admin/src/Controller/OAuthHandlerTrait.php');
+
+        // One choice, either an existing credential or an approved request.
+        $this->assertStringContainsString("'credential:' . (int) \$credential['id']", $template);
+        $this->assertStringContainsString("'request:' . \$approved['id']", $template);
+        $this->assertSame(2, substr_count($template, 'name="binding"'));
+        $this->assertStringNotContainsString('bearer_token', $template);
+        $this->assertStringContainsString('approveByClaiming(', $controller);
+        $this->assertStringNotContainsString('bearer_token', $controller);
+    }
+
     public function testTemplateProvidesRequestClaimAndIndependentAdminDecisionFormsInOrder(): void
     {
         $source = $this->source('admin/tmpl/credentials/default.php');

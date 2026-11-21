@@ -165,6 +165,13 @@ final class JoomlaApiTokenOwnershipValidator
             return ['reason' => self::REASON_ALGORITHM, 'token' => null];
         }
 
+        // Site-wide before per-user: with no secret no token works for anyone,
+        // and a caller must not create a seed for a claim that cannot succeed.
+        $secret = (string) ($this->secretProvider)();
+        if ($secret === '') {
+            return ['reason' => self::REASON_NO_SECRET, 'token' => null];
+        }
+
         $seed = $this->profileValue($userId, self::TOKEN_PROFILE_KEY);
         $enabled = $this->profileValue($userId, self::ENABLED_PROFILE_KEY);
         $rawSeed = $seed === null ? false : base64_decode($seed, true);
@@ -175,11 +182,6 @@ final class JoomlaApiTokenOwnershipValidator
 
         if ($enabled !== '1') {
             return ['reason' => self::REASON_NOT_ENABLED, 'token' => null];
-        }
-
-        $secret = (string) ($this->secretProvider)();
-        if ($secret === '') {
-            return ['reason' => self::REASON_NO_SECRET, 'token' => null];
         }
 
         return [

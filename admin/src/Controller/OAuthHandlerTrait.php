@@ -14,9 +14,14 @@ defined('_JEXEC') or die;
 
 use Joomla\CMS\Factory;
 use Joomla\CMS\Language\Text;
+use Joomla\CMS\Log\Log;
 use Joomla\CMS\Router\Route;
 use Joomla\CMS\Session\Session;
 use Joomla\CMS\Uri\Uri;
+use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialRequestOAuthClaims;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialRequestService;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthAuthorizationRequest;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthEndpoints;
@@ -80,7 +85,7 @@ trait OAuthHandlerTrait
             throw new \Exception(Text::_('COM_MCPSERVER_OAUTH_DISABLED'), 404);
         }
 
-        $server = OAuthServiceFactory::server($params);
+        $server = OAuthServiceFactory::server($params, $this->oauthCredentialClaims());
 
         // No caching and no framing anywhere in the flow (clickjacking on the
         // consent button is the classic attack on this page).
@@ -135,6 +140,7 @@ trait OAuthHandlerTrait
         $this->renderOAuthPage('default', [
             'request' => $request,
             'credentials' => $server->usableCredentials((int) $user->id),
+            'claimable' => $server->claimableRequests((int) $user->id),
             'pendingId' => $pendingId,
             'userName' => (string) $user->name,
             'action' => Uri::base() . 'index.php?option=com_mcpserver&task=oauth.authorize',
@@ -181,15 +187,60 @@ trait OAuthHandlerTrait
             return;
         }
 
+        // One radio group on the consent page: "credential:<id>" binds an
+        // existing credential, "request:<id>" claims an approved request.
+        [$kind, $id] = array_pad(explode(':', $app->input->post->getString('binding', ''), 2), 2, '');
+
         try {
-            $url = $server->approve($request, (int) $user->id, $app->input->post->getInt('credential_id', 0));
+            $url = $kind === 'request'
+                ? $server->approveByClaiming($request, (int) $user->id, (string) $user->username, $id)
+                : $server->approve($request, (int) $user->id, ctype_digit($id) ? (int) $id : 0);
         } catch (OAuthError $e) {
-            $this->renderOAuthError(Text::_('COM_MCPSERVER_OAUTH_ERROR_NO_CREDENTIAL'));
+            $this->renderOAuthError($kind === 'request'
+                ? Text::sprintf('COM_MCPSERVER_OAUTH_ERROR_CLAIM', $e->description)
+                : Text::_('COM_MCPSERVER_OAUTH_ERROR_NO_CREDENTIAL'));
+
+            return;
+        } catch (\Throwable $e) {
+            if ($kind !== 'request') {
+                throw $e;
+            }
+            // A fault after the claim: the server revokes what it created, or
+            // says which credential it could not. Log it rather than show it.
+            Log::add('OAuth consent claim failed: ' . $e->getMessage(), Log::ERROR, 'com_mcpserver');
+            $this->renderOAuthError(Text::_('COM_MCPSERVER_OAUTH_ERROR_CLAIM_FAILED'), 500);
 
             return;
         }
 
         $this->redirectToClient($url);
+    }
+
+    /**
+     * Lets the consent page claim approved credential requests, through the
+     * same services the credentials page uses. Null when those services are
+     * unavailable (for example, Governed Mode not yet set up): the page then
+     * offers existing credentials only.
+     */
+    private function oauthCredentialClaims(): ?CredentialRequestOAuthClaims
+    {
+        try {
+            $container = McpserverComponent::getServiceContainer();
+            if ($container === null
+                || !$container->has(CredentialRequestService::class)
+                || !$container->has(CredentialLifecycleService::class)) {
+                return null;
+            }
+
+            return new CredentialRequestOAuthClaims(
+                $container->get(CredentialRequestService::class),
+                $container->get(CredentialLifecycleService::class)
+            );
+        } catch (\Throwable $e) {
+            Log::add('OAuth consent cannot offer credential requests: ' . $e->getMessage(), Log::WARNING, 'com_mcpserver');
+
+            return null;
+        }
     }
 
     /**

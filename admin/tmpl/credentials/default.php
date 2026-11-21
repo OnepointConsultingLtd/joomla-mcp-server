@@ -79,6 +79,9 @@ HTMLHelper::_('bootstrap.tooltip');
             <div class="alert alert-success" role="alert">
                 <h5 class="alert-heading"><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_ISSUED_TITLE'); ?></h5>
                 <p><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_ISSUED_WARNING'); ?></p>
+                <?php if ($this->oauthEnabled): ?>
+                    <p><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_ISSUED_OAUTH_NOTE'); ?></p>
+                <?php endif; ?>
                 <dl class="row mb-0">
                     <dt class="col-sm-2"><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_ISSUED_TOKEN'); ?></dt>
                     <dd class="col-sm-10">

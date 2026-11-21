@@ -14,6 +14,7 @@ defined('_JEXEC') or die;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Joomla\Component\Mcpserver\Administrator\Service\CredentialClaimRefusedException;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthClientMetadataFetcher;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 use Joomla\Component\Mcpserver\Administrator\Service\OAuthError;
@@ -78,9 +79,9 @@ final class OAuthServerTest extends TestCase
         $this->server = $this->makeServer(new OAuthConfig(self::SITE));
     }
 
-    private function makeServer(OAuthConfig $config): OAuthServer
+    private function makeServer(OAuthConfig $config, ?FakeOAuthCredentialClaims $claims = null): OAuthServer
     {
-        return new OAuthServer($this->store, $config, fn (): DateTimeImmutable => $this->now, $this->fetcher);
+        return new OAuthServer($this->store, $config, fn (): DateTimeImmutable => $this->now, $this->fetcher, $claims);
     }
 
     private function authenticator(): OAuthTokenAuthenticator
@@ -160,6 +161,128 @@ final class OAuthServerTest extends TestCase
         }
 
         $this->fail("Expected OAuth error {$expected}");
+    }
+
+    // ---- Claiming an approved credential request at consent ----------------
+
+    private const REQUEST = '3';
+
+    private function serverWithClaims(): array
+    {
+        $claims = new FakeOAuthCredentialClaims($this->store);
+        $claims->approve(self::REQUEST, self::USER, 'Claude Desktop');
+
+        return [$this->makeServer(new OAuthConfig(self::SITE), $claims), $claims];
+    }
+
+    public function testConsentOffersTheUsersApprovedRequestsAlongsideTheirCredentials(): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $claims->approve('9', 99, 'Someone else');
+
+        $this->assertSame([['id' => self::REQUEST, 'name' => 'Claude Desktop', 'expires' => null]], $server->claimableRequests(self::USER));
+        $this->assertSame([self::CREDENTIAL], array_column($server->usableCredentials(self::USER), 'id'));
+        $this->assertSame([], $this->server->claimableRequests(self::USER), 'without the claims service there is nothing to claim');
+    }
+
+    public function testApprovingWithARequestClaimsItAndSignsInAsTheNewCredential(): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $client = $this->registerPublic();
+        $request = $server->validateAuthorizationRequest($this->authorizeParams($client['client_id']));
+
+        $url = $server->approveByClaiming($request, self::USER, 'ada', self::REQUEST);
+
+        $this->assertSame([self::REQUEST], $claims->claimed);
+        $query = self::redirectQuery($url);
+        $keys = array_keys($query);
+        sort($keys);
+        $this->assertSame(['code', 'iss', 'state'], $keys, 'the client gets an authorisation code and nothing else');
+        $this->assertStringNotContainsString('mcp_', $url, 'no credential bearer token reaches the client');
+
+        $tokens = $server->token([
+            'grant_type' => 'authorization_code',
+            'client_id' => $client['client_id'],
+            'code' => $query['code'],
+            'redirect_uri' => self::REDIRECT,
+            'code_verifier' => self::VERIFIER,
+        ], '');
+        $this->assertStringNotContainsString('mcp_', (string) json_encode($tokens));
+
+        $record = $this->authenticator()->authenticate($tokens['access_token'], $this->now);
+        $this->assertSame(100, $record->credentialId, 'the grant is bound to the credential the claim created');
+        $this->assertSame([], $server->claimableRequests(self::USER), 'a claimed request is not offered again');
+    }
+
+    /** @return array<string,array{0:string}> */
+    public static function requestsTheUserCannotClaim(): array
+    {
+        return [
+            'someone else\'s' => ['9'],
+            'unknown' => ['404'],
+        ];
+    }
+
+    /** @dataProvider requestsTheUserCannotClaim */
+    public function testOnlyTheUsersOwnClaimableRequestsCanBeClaimedAtConsent(string $requestId): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $claims->approve('9', 99, 'Someone else');
+        $client = $this->registerPublic();
+        $request = $server->validateAuthorizationRequest($this->authorizeParams($client['client_id']));
+
+        $this->assertOAuthError('invalid_request', fn () => $server->approveByClaiming($request, self::USER, 'ada', $requestId));
+
+        $this->assertSame([], $claims->claimed);
+        $this->assertSame([], $this->store->grants);
+    }
+
+    public function testAClaimTheCredentialServiceRefusesIsReportedWithItsReason(): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $claims->refusal = new CredentialClaimRefusedException('Your user group is not allowed to hold a Joomla API token');
+        $client = $this->registerPublic();
+        $request = $server->validateAuthorizationRequest($this->authorizeParams($client['client_id']));
+
+        $error = $this->assertOAuthError('invalid_request', fn () => $server->approveByClaiming($request, self::USER, 'ada', self::REQUEST));
+
+        $this->assertStringContainsString('not allowed to hold a Joomla API token', $error->description);
+        $this->assertSame([], $this->store->grants);
+    }
+
+    public function testAFaultDuringTheClaimIsNotShownAsItsReason(): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $claims->refusal = new \RuntimeException('SQLSTATE[HY000]: connection lost to db-internal-7');
+        $client = $this->registerPublic();
+        $request = $server->validateAuthorizationRequest($this->authorizeParams($client['client_id']));
+
+        try {
+            $server->approveByClaiming($request, self::USER, 'ada', self::REQUEST);
+            $this->fail('The fault should propagate');
+        } catch (OAuthError $e) {
+            $this->fail('A fault must not become a user-facing OAuth error: ' . $e->description);
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('SQLSTATE', $e->getMessage());
+        }
+        $this->assertSame([], $this->store->grants);
+    }
+
+    public function testAFailedGrantAfterAClaimLeavesNoUsableCredential(): void
+    {
+        [$server, $claims] = $this->serverWithClaims();
+        $client = $this->registerPublic();
+        $request = $server->validateAuthorizationRequest($this->authorizeParams($client['client_id']));
+        $this->store->failGrants = true;
+
+        try {
+            $server->approveByClaiming($request, self::USER, 'ada', self::REQUEST);
+            $this->fail('The approval should have failed');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertSame([100], $claims->revoked);
+        $this->assertSame([self::CREDENTIAL], array_column($server->usableCredentials(self::USER), 'id'), 'the never-shown credential is not left usable');
     }
 
     // ---- Dynamic Client Registration ---------------------------------------

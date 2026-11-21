@@ -19,6 +19,8 @@ use Joomla\CMS\Uri\Uri;
 /** @var \Joomla\Component\Mcpserver\Administrator\Service\OAuthAuthorizationRequest $request */
 $request = $this->oauth['request'];
 $credentials = $this->oauth['credentials'];
+$claimable = $this->oauth['claimable'] ?? [];
+$hasChoice = $credentials !== [] || $claimable !== [];
 $e = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 ?>
 <div class="com-mcpserver-oauth">
@@ -37,7 +39,7 @@ $e = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, '
     </div>
 
     <form action="<?php echo $e($this->oauth['action']); ?>" method="post">
-        <?php if ($credentials === []): ?>
+        <?php if (!$hasChoice): ?>
             <div class="alert alert-info">
                 <?php echo Text::sprintf(
                     'COM_MCPSERVER_OAUTH_NO_CREDENTIALS',
@@ -49,12 +51,14 @@ $e = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, '
 
             <fieldset class="mb-3">
                 <legend class="h5"><?php echo Text::_('COM_MCPSERVER_OAUTH_CHOOSE_CREDENTIAL'); ?></legend>
-                <?php foreach ($credentials as $i => $credential): ?>
+                <?php $first = true; ?>
+                <?php foreach ($credentials as $credential): ?>
+                    <?php $value = 'credential:' . (int) $credential['id']; ?>
                     <div class="form-check">
-                        <input class="form-check-input" type="radio" name="credential_id"
-                               id="mcp-credential-<?php echo (int) $credential['id']; ?>"
-                               value="<?php echo (int) $credential['id']; ?>"<?php echo $i === 0 ? ' checked' : ''; ?> required>
-                        <label class="form-check-label" for="mcp-credential-<?php echo (int) $credential['id']; ?>">
+                        <input class="form-check-input" type="radio" name="binding"
+                               id="mcp-binding-<?php echo $e(str_replace(':', '-', $value)); ?>"
+                               value="<?php echo $e($value); ?>"<?php echo $first ? ' checked' : ''; ?> required>
+                        <label class="form-check-label" for="mcp-binding-<?php echo $e(str_replace(':', '-', $value)); ?>">
                             <?php echo $e($credential['name']); ?>
                             <?php if ($credential['expires'] !== null): ?>
                                 <small class="text-muted">
@@ -63,9 +67,29 @@ $e = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, '
                             <?php endif; ?>
                         </label>
                     </div>
+                    <?php $first = false; ?>
+                <?php endforeach; ?>
+                <?php foreach ($claimable as $approved): ?>
+                    <?php $value = 'request:' . $approved['id']; ?>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="binding"
+                               id="mcp-binding-<?php echo $e(str_replace(':', '-', $value)); ?>"
+                               value="<?php echo $e($value); ?>"<?php echo $first ? ' checked' : ''; ?> required>
+                        <label class="form-check-label" for="mcp-binding-<?php echo $e(str_replace(':', '-', $value)); ?>">
+                            <?php echo $e($approved['name']); ?>
+                            <small class="text-muted">
+                                (<?php echo Text::_('COM_MCPSERVER_OAUTH_APPROVED_REQUEST'); ?><?php if ($approved['expires'] !== null): ?>,
+                                <?php echo Text::sprintf('COM_MCPSERVER_OAUTH_CREDENTIAL_EXPIRES', HTMLHelper::_('date', $approved['expires']->format('Y-m-d H:i:s'), Text::_('DATE_FORMAT_LC4'))); ?><?php endif; ?>)
+                            </small>
+                        </label>
+                    </div>
+                    <?php $first = false; ?>
                 <?php endforeach; ?>
             </fieldset>
 
+            <?php if ($claimable !== []): ?>
+                <p class="small text-muted"><?php echo Text::_('COM_MCPSERVER_OAUTH_CLAIM_HINT'); ?></p>
+            <?php endif; ?>
             <p class="small text-muted"><?php echo Text::_('COM_MCPSERVER_OAUTH_REVOKE_HINT'); ?></p>
         <?php endif; ?>
 
@@ -73,7 +97,7 @@ $e = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES, '
         <?php echo HTMLHelper::_('form.token'); ?>
 
         <div class="d-flex gap-2">
-            <?php if ($credentials !== []): ?>
+            <?php if ($hasChoice): ?>
                 <button type="submit" name="decision" value="approve" class="btn btn-primary">
                     <?php echo Text::_('COM_MCPSERVER_OAUTH_APPROVE'); ?>
                 </button>

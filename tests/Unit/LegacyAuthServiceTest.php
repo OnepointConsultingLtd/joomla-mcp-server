@@ -77,6 +77,16 @@ final class LegacyAuthServiceTest extends TestCase
         $this->assertNull($auth->authenticate(), 'a matching shared token must authenticate');
     }
 
+    public function testSharedTokenAuthenticatesWithALowerCaseScheme(): void
+    {
+        $auth = $this->service(
+            ['governed_mode' => false, 'require_auth' => true, 'mcp_bearer_token' => 'correct-token'],
+            ['HTTP_AUTHORIZATION' => 'bearer correct-token']
+        );
+
+        $this->assertNull($auth->authenticate(), 'the Bearer scheme is case-insensitive (RFC 7235)');
+    }
+
     /**
      * Without this, deleting the hash_equals() comparison lets any bearer token
      * authenticate in legacy mode and no test notices.

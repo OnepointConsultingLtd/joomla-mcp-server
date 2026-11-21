@@ -75,6 +75,15 @@ final class GovernedAuthServiceTest extends TestCase
         $this->assertSame('api-token', $result->apiToken());
     }
 
+    public function testCredentialBearerTokenAuthenticatesWithALowerCaseScheme(): void
+    {
+        [$authenticator, $token] = $this->makeAuthenticator();
+
+        $service = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('bearer ' . $token));
+
+        $this->assertInstanceOf(AuthenticatedPrincipal::class, $service->authenticate());
+    }
+
     public function testMissingAuthorizationHeaderReturnsGenericUnauthorized(): void
     {
         [$authenticator] = $this->makeAuthenticator();

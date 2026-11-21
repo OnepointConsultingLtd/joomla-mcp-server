@@ -14,6 +14,7 @@ All notable release changes for MCP Server for Joomla are recorded here.
 - Fixed the component's front-end files never being installed. The manifest nested them in a `<site>` element, which Joomla ignores, so `components/com_mcpserver/` was missing on every site: the stdio bridge was not at `components/com_mcpserver/mcp-http-bridge.js` as documented, and the server icon advertised to MCP clients returned 404. Installing 1.12.0 adds them.
 - Super Users can now approve or reject their own credential requests. Previously a second Super User had to decide them, so a site with a single administrator could not issue itself a credential. The decision is still recorded against the approver in the request audit trail.
 - Added a `WWW-Authenticate` header to HTTP 401 responses from the MCP endpoint while OAuth Sign-in is on, pointing OAuth-capable clients at the site's Protected Resource Metadata.
+- The `Authorization` header's `Bearer` scheme is now accepted in any letter case (`bearer`, `BEARER`), as RFC 7235 requires, in shared-token mode and Governed Mode, and for OAuth access tokens. Previously only `Bearer` was accepted.
 
 ## 1.11.1 - 2026-11-13
 

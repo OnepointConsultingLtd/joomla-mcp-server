@@ -61,14 +61,38 @@ final class AuthorizationHeaderTest extends TestCase
     /**
      * @return array<string,array{string}>
      */
+    public static function schemeCasings(): array
+    {
+        return [
+            'Bearer' => ['Bearer'],
+            'lower-case' => ['bearer'],
+            'upper-case' => ['BEARER'],
+            'mixed-case' => ['bEaReR'],
+        ];
+    }
+
+    /**
+     * The scheme name is case-insensitive (RFC 7235 §2.1).
+     */
+    #[DataProvider('schemeCasings')]
+    public function testTheSchemeIsMatchedInAnyLetterCase(string $scheme): void
+    {
+        $this->assertSame('abc', AuthorizationHeader::bearerToken($scheme . ' abc'));
+    }
+
+    /**
+     * @return array<string,array{string}>
+     */
     public static function notABearerCredential(): array
     {
         return [
             'empty header' => [''],
             'Basic scheme' => ['Basic dXNlcjpwYXNz'],
             'scheme only' => ['Bearer'],
+            'lower-case scheme only' => ['bearer'],
             'scheme and space, no token' => ['Bearer '],
-            'lower-case scheme' => ['bearer abc'],
+            'lower-case scheme and space, no token' => ['bearer '],
+            'another scheme, with the token the casing tests accept' => ['Basic abc'],
             'scheme not followed by a space' => ['Bearerabc'],
             'leading whitespace' => [' Bearer abc'],
             'tab instead of space' => ["Bearer\tabc"],
@@ -89,5 +113,6 @@ final class AuthorizationHeaderTest extends TestCase
     {
         $this->assertSame(' abc', AuthorizationHeader::bearerToken('Bearer  abc'));
         $this->assertSame('abc ', AuthorizationHeader::bearerToken('Bearer abc '));
+        $this->assertSame(' abc', AuthorizationHeader::bearerToken('bearer  abc'));
     }
 }

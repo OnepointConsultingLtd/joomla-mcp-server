@@ -118,6 +118,14 @@ final class OAuthGovernedAuthTest extends TestCase
         $this->assertSame(1, $this->credentialStore->touches, 'last_used is stamped as for a credential bearer token');
     }
 
+    public function testAccessTokenAuthenticatesWithALowerCaseScheme(): void
+    {
+        $result = $this->authenticate('bearer ' . $this->accessToken());
+
+        $this->assertInstanceOf(AuthenticatedPrincipal::class, $result);
+        $this->assertSame(self::CREDENTIAL, $result->credentialId);
+    }
+
     public function testAccessTokenWorksAtTheSefFormOfTheSiteEndpoint(): void
     {
         $result = $this->authenticate('Bearer ' . $this->accessToken(), true, 'https://example.com/component/mcpserver/rpc.handle');

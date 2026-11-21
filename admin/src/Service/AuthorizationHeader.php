@@ -50,17 +50,18 @@ final class AuthorizationHeader
      * The token from an Authorization header value, or null when the header
      * is not a bearer credential.
      *
-     * The scheme must be exactly "Bearer" followed by one space, and the rest
-     * of the value is the token, returned as sent: no trimming, so a padded
-     * token never matches a stored one.
+     * The scheme must be "Bearer", in any letter case (RFC 7235 §2.1),
+     * followed by one space, and the rest of the value is the token, returned
+     * as sent: no trimming, so a padded token never matches a stored one.
      */
     public static function bearerToken(string $header): ?string
     {
-        if (!str_starts_with($header, self::BEARER_PREFIX)) {
+        $prefixLength = strlen(self::BEARER_PREFIX);
+        if (strncasecmp($header, self::BEARER_PREFIX, $prefixLength) !== 0) {
             return null;
         }
 
-        $token = substr($header, strlen(self::BEARER_PREFIX));
+        $token = substr($header, $prefixLength);
 
         return $token === '' ? null : $token;
     }

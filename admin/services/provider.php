@@ -191,7 +191,7 @@ return new class implements ServiceProviderInterface {
                 $governedAuthService = $container->get(GovernedAuthService::class);
             } catch (\RuntimeException) {
                 // Governed key material is not yet provisioned (e.g. empty or
-                // malformed credential_salt). Fail closed: legacy mode keeps
+                // malformed credential_salt). Fail closed: shared-token mode keeps
                 // working; governed mode reports "not configured" at request time.
                 $governedAuthService = null;
             }
@@ -248,7 +248,7 @@ return new class implements ServiceProviderInterface {
 
         // Governance audit service: the sole writer of #__mcpserver_request_log,
         // persisting one row per MCP request, attributed to the authenticated
-        // principal when one is available (null attribution in legacy
+        // principal when one is available (null attribution in
         // shared-token mode). Params are injected so it honours metrics_enabled
         // and metrics_retention_days, which it inherited from MetricsService.
         $container->share(GovernanceAuditService::class, function () {
@@ -319,7 +319,7 @@ return new class implements ServiceProviderInterface {
             );
         });
 
-        // REST client (shared/legacy token)
+        // REST client using the shared Joomla API token
         $container->share(RestClient::class, function (Container $container) {
             return $container->get(RestClientFactory::class)->createShared();
         });

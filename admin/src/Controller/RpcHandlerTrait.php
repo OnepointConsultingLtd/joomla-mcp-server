@@ -121,7 +121,8 @@ trait RpcHandlerTrait
         $sessionId = bin2hex(random_bytes(16));
         // Bound to this principal's credential so a response posted under a
         // different governed credential (even with the same sessionId) is
-        // never delivered here. Legacy (null-principal) sessions are unaffected.
+        // never delivered here. Shared-token mode (null-principal) sessions are
+        // unaffected.
         $cacheKey = PrincipalCache::sessionKeyFor($sessionId, $principal);
 
         header('Content-Type: text/event-stream');
@@ -256,7 +257,8 @@ trait RpcHandlerTrait
         // Resolve the principal first: a governed-mode credential authenticates
         // successfully as an AuthenticatedPrincipal, never as an error array, so
         // authenticate() below is only reached (and only touches credential state)
-        // on the non-principal paths (legacy mode, or a failed/absent credential).
+        // on the non-principal paths (shared-token mode, or a failed/absent
+        // credential).
         $principal = $authService->authenticatePrincipal();
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
@@ -424,8 +426,8 @@ trait RpcHandlerTrait
         if (!empty($sessionId)) {
             $sseCache = new JoomlaCache('mcp_sse');
             // Same principal-bound key derivation as sse()'s poller, so only the
-            // matching authenticated principal (or a legacy null principal) can
-            // retrieve this response for this sessionId.
+            // matching authenticated principal (or, in shared-token mode, the
+            // null principal) can retrieve this response for this sessionId.
             $sseCache->set(PrincipalCache::sessionKeyFor($sessionId, $principal), $jsonResponse, 30);
             http_response_code(202);
             echo json_encode(['status' => 'accepted', 'sessionId' => $sessionId]);
@@ -974,9 +976,9 @@ trait RpcHandlerTrait
      * write is logged at critical: silently losing the row would destroy the
      * accountability guarantee that is this feature's entire purpose. Note both
      * run before the success response is echoed, so they add latency to the
-     * request. A legacy null principal is still audited (with null attribution)
-     * but never emits an Action Log entry — there is no Joomla user to
-     * attribute it to.
+     * request. A null principal (shared-token mode) is still audited (with
+     * null attribution) but never emits an Action Log entry — there is no
+     * Joomla user to attribute it to.
      */
     private function recordGovernanceAudit(
         float $startTime,
@@ -1092,7 +1094,8 @@ trait RpcHandlerTrait
         $cacheBackend = new JoomlaCache('com_mcpserver');
         // Governed mode: namespace the request-local RpcService cache by the
         // authenticated user so distinct governed users never observe each
-        // other's cached results. Legacy (null principal) is unaffected.
+        // other's cached results. Shared-token mode (null principal) is
+        // unaffected.
         $cache = new CacheService(new PrincipalCache($cacheBackend, $principal), $cacheTtl);
         $policy = new PolicyService(ComponentHelper::getParams('com_mcpserver'));
         $toolRegistry = new ToolRegistry();

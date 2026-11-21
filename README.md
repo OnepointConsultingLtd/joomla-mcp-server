@@ -321,7 +321,7 @@ Key settings:
 
 - `Server Name`: identifier returned in MCP server information.
 - `Base URL`: base URL of the Joomla site. Leave empty to use the current site.
-- `API Token`: Joomla Web Services API token used for outbound REST calls.
+- `Shared Joomla API Token`: Joomla Web Services API token used for outbound REST calls in shared-token mode.
 - `Verify SSL`: verifies SSL certificates for outbound requests.
 - `Resolve Host To IP`: optional. Pins the Base URL hostname to a specific IP (e.g. `127.0.0.1`) for the component's outbound REST calls only. Use when the server cannot reach its own public hostname (NAT hairpinning); the Host header and TLS validation still use the real hostname, so `Verify SSL` can stay on.
 - `Cache TTL`: response cache lifetime in seconds.
@@ -338,7 +338,7 @@ Key settings:
 
 ### Configuring the API Token
 
-The `API Token` setting holds a Joomla Web Services API token. The component uses it to make outbound REST calls to your site's own Joomla Web Services API, which is how most MCP tools read and write content. Without a valid token, those tools will fail.
+The `Shared Joomla API Token` setting holds a Joomla Web Services API token. The component uses it to make outbound REST calls to your site's own Joomla Web Services API, which is how most MCP tools read and write content. Without a valid token, those tools will fail.
 
 1. **Enable the Web Services API.** In the Joomla administrator, go to **System → Global Configuration → Server** and ensure the Web Services components are available. The relevant plugins live under **System → Plugins**; enable **Web Services - Content** (and any other `Web Services -` plugins for the data you want to access). The API plugin **System - Joomla API Authentication** must also be enabled — it is by default.
 
@@ -346,7 +346,7 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
    - Go to **Users → Manage**, edit the chosen user, and open the **Joomla API Token** tab.
    - Set **Token Enabled** to *Yes*, click **Save**, then copy the generated token. (If the tab is missing, enable the **User - Joomla API Token** plugin under **System → Plugins**.)
 
-3. **Paste the token into the component options.** Back in **Components → MCP Server**, click **Options** in the toolbar, paste the value into **API Token** and click **Save**.
+3. **Paste the token into the component options.** Back in **Components → MCP Server**, click **Options** in the toolbar, paste the value into **Shared Joomla API Token** and click **Save**.
 
 4. **Verify the API is reachable.** The component calls your site's own API under `/api/`, so the web server must route that path to Joomla's API application. On Apache this works out of the box — Joomla's core `.htaccess` rewrites `/api/` requests to `api/index.php`. On nginx there is no equivalent by default, so every tool fails while `health.ping` still reports `ok` (that endpoint only checks the component itself, not the outbound API layer). Check with:
 
@@ -375,7 +375,7 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
 
 ## Governed Mode (per-client credentials)
 
-By default the component authenticates every MCP client with the single shared **MCP Bearer Token** and makes outbound Joomla API calls with the **Legacy Shared API Token** in Basic Settings. **Governed Mode** ignores that Basic Settings token and replaces it with individually issued, revocable credentials: each MCP client authenticates with its own bearer token, and every request is made using the Joomla API token encrypted inside that client's credential. Successful mutating tool calls made under a governed credential are additionally attributed to the credential's Joomla user in both the component's own request log and, when available, Joomla's core **Action Logs**.
+By default the component authenticates every MCP client with the single shared **MCP Bearer Token** and makes outbound Joomla API calls with the **Shared Joomla API Token** in Basic Settings. **Governed Mode** ignores that Basic Settings token and replaces it with individually issued, revocable credentials: each MCP client authenticates with its own bearer token, and every request is made using the Joomla API token encrypted inside that client's credential. Successful mutating tool calls made under a governed credential are additionally attributed to the credential's Joomla user in both the component's own request log and, when available, Joomla's core **Action Logs**.
 
 ### Prerequisite: API tokens for every user who needs a credential
 
@@ -410,7 +410,7 @@ Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Sec
 
 > **Plan for downtime.** Enabling Governed Mode stops the shared `MCP Bearer Token` from being accepted immediately, but credentials can only be requested after it is enabled. Every MCP client is therefore refused from the moment you switch it on until its user has claimed a credential. Do the cutover in a maintenance window, and have each user ready to claim.
 
-1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the shared `API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
+1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the `Shared Joomla API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
 2. Open **Manage Credentials** and check the Setup panel above: the credential salt is generated automatically on install/update, so this is normally a confirmation rather than an action.
 3. Each eligible user opens **Manage Credentials** and requests access with the client name. A Super User reviews the pending request, approves it, and chooses that request's expiry. Super Users can approve or reject their own requests, so a site with a single administrator can issue itself a credential.
 4. The request owner then opens their approved request and claims the credential. The component binds the owner's own current Joomla API token at this step; the owner does not enter it. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
@@ -420,7 +420,7 @@ To roll back, switch Governed Mode off: the shared bearer token is accepted agai
 
 ### Rollback
 
-Disabling **Governed Mode** in **Options → Security Settings** is the rollback: it does not delete the credential salt, any issued credential, or the audit trail — it only stops governed authentication being used, so requests fall back to the shared `MCP Bearer Token` and shared `API Token` immediately. Re-enabling later resumes governed authentication with the same salt and the same still-active credentials, without needing to re-run Setup or reissue credentials (unless they have since expired or been revoked).
+Disabling **Governed Mode** in **Options → Security Settings** is the rollback: it does not delete the credential salt, any issued credential, or the audit trail — it only stops governed authentication being used, so requests fall back to the shared `MCP Bearer Token` and `Shared Joomla API Token` immediately. Re-enabling later resumes governed authentication with the same salt and the same still-active credentials, without needing to re-run Setup or reissue credentials (unless they have since expired or been revoked).
 
 ### Recovery
 

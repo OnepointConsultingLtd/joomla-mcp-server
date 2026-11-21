@@ -18,8 +18,9 @@ use Psr\SimpleCache\CacheInterface;
 /**
  * Namespaces cache keys by the authenticated governed principal so distinct
  * governed users never observe each other's cached RPC results or SSE
- * responses. A null principal (legacy shared-token mode) is a transparent
- * pass-through: keys are returned unmodified, preserving legacy behavior.
+ * responses. A null principal (shared-token mode) is a transparent
+ * pass-through: keys are returned unmodified, as they were before Governed
+ * Mode existed.
  */
 final class PrincipalCache implements CacheInterface
 {
@@ -50,8 +51,8 @@ final class PrincipalCache implements CacheInterface
      * token, but the poster's and the poller's principal must independently
      * derive the same storage key for a response to be delivered — so a
      * session opened or posted to by one governed credential cannot be
-     * consumed by another. Legacy (non-governed) sessions keep their raw
-     * sessionId, preserving existing behavior.
+     * consumed by another. Shared-token mode sessions keep their raw
+     * sessionId, as before.
      */
     public static function sessionKeyFor(string $sessionId, ?AuthenticatedPrincipal $principal): string
     {

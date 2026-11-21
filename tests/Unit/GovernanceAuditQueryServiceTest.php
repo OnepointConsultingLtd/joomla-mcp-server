@@ -412,7 +412,7 @@ final class GovernanceAuditQueryServiceTest extends TestCase
     }
 
     /**
-     * Rows with no user_id belong to no account (legacy shared-token mode, or
+     * Rows with no user_id belong to no account (shared-token mode, or
      * a failure before a principal was resolved). They are reached by not
      * filtering, so they must not produce a phantom option.
      */

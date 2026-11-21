@@ -169,8 +169,8 @@ class CredentialsController extends BaseController
     }
 
     /**
-     * Revoke a credential. Owners may revoke their own; `core.manage`
-     * holders may revoke any credential by id.
+     * Revoke a credential. Owners may revoke their own; users granted
+     * `core.manage` may revoke any credential by id.
      */
     public function revoke(): void
     {
@@ -275,7 +275,7 @@ class CredentialsController extends BaseController
      * menu item would leave every task reachable by URL.
      *
      * Audit pruning is deliberately not gated on it — #__mcpserver_request_log
-     * is written in legacy shared-token mode too, so a site that never enables
+     * is written in shared-token mode too, so a site that never enables
      * Governed Mode still needs to be able to trim it.
      */
     private function isGovernedModeEnabled(): bool

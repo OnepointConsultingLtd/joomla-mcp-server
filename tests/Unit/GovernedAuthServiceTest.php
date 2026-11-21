@@ -120,7 +120,7 @@ final class GovernedAuthServiceTest extends TestCase
         $config = new Registry([
             'governed_mode' => true,
             // A shared token is present but must never be consulted in governed mode.
-            'mcp_bearer_token' => 'legacy-shared-token',
+            'mcp_bearer_token' => 'shared-bearer-token',
             'require_auth' => true,
         ]);
 
@@ -190,7 +190,7 @@ final class GovernedAuthServiceTest extends TestCase
         $this->assertSame(JsonRpc::FORBIDDEN, $result['code']);
     }
 
-    public function testLegacyModeUnaffectedByGovernedHelperAbsence(): void
+    public function testSharedTokenModeUnaffectedByGovernedHelperAbsence(): void
     {
         Factory::$application = new class {
             public object $input;

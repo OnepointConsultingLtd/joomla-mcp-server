@@ -17,7 +17,7 @@ use PHPUnit\Framework\TestCase;
 final class GovernedApiTokenConfigTest extends TestCase
 {
     /** @dataProvider configFiles */
-    public function testLegacyTokenIsUnavailableWhenGovernedModeIsEnabled(string $path): void
+    public function testSharedJoomlaApiTokenIsUnavailableWhenGovernedModeIsEnabled(string $path): void
     {
         $xml = (string) file_get_contents($path);
 

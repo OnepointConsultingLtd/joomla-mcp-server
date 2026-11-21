@@ -67,15 +67,15 @@ final class PrincipalCacheTest extends TestCase
         self::assertSame('bob-data', $bob->get('articles_search:foo'));
     }
 
-    public function testNullPrincipalIsTransparentPassThroughToLegacyKeys(): void
+    public function testNullPrincipalIsTransparentPassThroughToUnprefixedKeys(): void
     {
         $inner = new SimpleArrayCache();
-        $legacy = new PrincipalCache($inner, null);
+        $unscoped = new PrincipalCache($inner, null);
 
-        $legacy->set('article:1', 'shared-data');
+        $unscoped->set('article:1', 'shared-data');
 
         self::assertSame('shared-data', $inner->get('article:1'));
-        self::assertSame('shared-data', $legacy->get('article:1'));
+        self::assertSame('shared-data', $unscoped->get('article:1'));
     }
 
     public function testKeyForNamespacesByUserIdNotCredentialOrSelector(): void
@@ -90,7 +90,7 @@ final class PrincipalCacheTest extends TestCase
         self::assertSame('u42:article:1', PrincipalCache::keyFor('article:1', $principalA));
     }
 
-    public function testKeyForReturnsLegacyKeyForNullPrincipal(): void
+    public function testKeyForReturnsTheKeyUnchangedForNullPrincipal(): void
     {
         self::assertSame('article:1', PrincipalCache::keyFor('article:1', null));
     }
@@ -108,7 +108,7 @@ final class PrincipalCacheTest extends TestCase
         self::assertSame($keyA, PrincipalCache::sessionKeyFor($sessionId, $principalA));
     }
 
-    public function testSessionKeyForReturnsLegacySessionIdForNullPrincipal(): void
+    public function testSessionKeyForReturnsTheSessionIdUnchangedForNullPrincipal(): void
     {
         self::assertSame('abc123', PrincipalCache::sessionKeyFor('abc123', null));
     }

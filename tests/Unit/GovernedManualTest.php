@@ -25,7 +25,7 @@ final class GovernedManualTest extends TestCase
         $this->assertStringContainsString("'token' => \$this->governedMode ? '' : \$token", $source);
     }
 
-    public function testGovernedManualLinksToCredentialsAndDoesNotRevealLegacyToken(): void
+    public function testGovernedManualLinksToCredentialsAndDoesNotRevealTheSharedBearerToken(): void
     {
         $source = (string) file_get_contents(__DIR__ . '/../../admin/tmpl/mcpcomponent/default.php');
 

@@ -200,7 +200,7 @@ final class GovernanceAuditServiceTest extends TestCase
         $this->assertStringNotContainsString('super-secret-token-value', $sql);
     }
 
-    public function testRecordUsesNullAttributionForLegacySharedTokenRequest(): void
+    public function testRecordUsesNullAttributionForSharedTokenModeRequest(): void
     {
         $db = new FakeAuditDatabase();
         $service = new GovernanceAuditService($db, $this->clock());

@@ -1519,8 +1519,8 @@ class RpcService
     private function injectRawArticleContent(array $response): array
     {
         // Governed principals must only see the Joomla Web Services response
-        // authorized by their own API token. Legacy shared-token operation
-        // retains the existing raw-content round-trip behavior.
+        // authorised by their own API token. Shared-token mode keeps the
+        // raw-content round trip.
         if (!$this->allowRawArticleContent) {
             return $response;
         }
@@ -4049,7 +4049,7 @@ class RpcService
         // Governed mode only. GovernedToolAuthorizer maps this tool through
         // 'plugin_extension', so it can only produce an ACL decision for a
         // plugin row; anything else has no asset to authorise against and must
-        // not proceed. In legacy shared-token mode there is no such mapping,
+        // not proceed. In shared-token mode there is no such mapping,
         // and the tool's own schema and list_extensions advertise every
         // extension type — restricting it there would silently break existing
         // workflows that disable a module or unpublish a template.

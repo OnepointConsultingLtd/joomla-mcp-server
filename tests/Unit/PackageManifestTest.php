@@ -88,13 +88,36 @@ final class PackageManifestTest extends TestCase
 
         $folders = array_map('strval', iterator_to_array($component->files->folder, false));
         $filenames = array_map('strval', iterator_to_array($component->files->filename, false));
-        foreach (['tmpl', 'language', 'src', 'services'] as $folder) {
+        foreach (['tmpl', 'language'] as $folder) {
             $this->assertContains($folder, $folders);
             $this->assertDirectoryExists(self::ROOT . '/site/' . $folder);
         }
         foreach (['icon.png', 'mcp-http-bridge.js'] as $filename) {
             $this->assertContains($filename, $filenames);
             $this->assertFileExists(self::ROOT . '/site/' . $filename);
+        }
+    }
+
+    /**
+     * Joomla boots the component from the administrator provider and routes
+     * every front-end task to an Administrator controller, so site-side
+     * routing (provider, dispatcher, controllers, the legacy entry file and
+     * router) is never run. Shipping it misled contributors into adding a
+     * front-end task there, which is how oauth.* was unreachable in 1.12.0.
+     */
+    public function testComponentShipsNoSiteSideRouting(): void
+    {
+        $component = self::manifest('mcpserver.xml');
+        $folders = array_map('strval', iterator_to_array($component->files->folder, false));
+        $filenames = array_map('strval', iterator_to_array($component->files->filename, false));
+
+        foreach (['src', 'services'] as $folder) {
+            $this->assertNotContains($folder, $folders);
+            $this->assertDirectoryDoesNotExist(self::ROOT . '/site/' . $folder);
+        }
+        foreach (['mcpserver.php', 'router.php'] as $filename) {
+            $this->assertNotContains($filename, $filenames);
+            $this->assertFileDoesNotExist(self::ROOT . '/site/' . $filename);
         }
     }
 }

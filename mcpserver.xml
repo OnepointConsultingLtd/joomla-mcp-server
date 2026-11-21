@@ -24,12 +24,8 @@
         was never installed (no OAuth templates, icon or stdio bridge).
     -->
     <files folder="site">
-        <filename>mcpserver.php</filename>
-        <filename>router.php</filename>
         <filename>mcp-http-bridge.js</filename>
         <filename>icon.png</filename>
-        <folder>src</folder>
-        <folder>services</folder>
         <folder>tmpl</folder>
         <folder>language</folder>
     </files>

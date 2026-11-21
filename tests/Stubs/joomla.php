@@ -716,6 +716,110 @@ namespace Joomla\CMS\Language {
     }
 }
 
+namespace Joomla\CMS\MVC\Controller {
+    if (!class_exists(BaseController::class)) {
+        /**
+         * Lets the component's controllers load, so ControllerResolutionTest
+         * can check which public methods each one offers as tasks.
+         *
+         * It declares the real BaseController's public methods (Joomla 5,
+         * with those of its Logger- and DispatcherAware traits), because
+         * Joomla excludes exactly these when it maps tasks to methods, except
+         * display(). The bodies do nothing; never execute a controller here.
+         */
+        class BaseController
+        {
+            public static function addModelPath($path, $prefix = '')
+            {
+            }
+
+            public static function createFileName($type, $parts = [])
+            {
+            }
+
+            public static function getInstance($prefix, $config = [])
+            {
+            }
+
+            public function __construct($config = [], $factory = null, $app = null, $input = null)
+            {
+            }
+
+            public function addViewPath($path)
+            {
+            }
+
+            public function display($cachable = false, $urlparams = [])
+            {
+            }
+
+            public function execute($task)
+            {
+            }
+
+            public function getModel($name = '', $prefix = '', $config = [])
+            {
+            }
+
+            public function getName()
+            {
+            }
+
+            public function getTask()
+            {
+            }
+
+            public function getTasks()
+            {
+            }
+
+            public function getView($name = '', $type = '', $prefix = '', $config = [])
+            {
+            }
+
+            public function redirect()
+            {
+            }
+
+            public function registerDefaultTask($method)
+            {
+            }
+
+            public function registerTask($task, $method)
+            {
+            }
+
+            public function unregisterTask($task)
+            {
+            }
+
+            public function setMessage($text, $type = 'message')
+            {
+            }
+
+            public function checkToken($method = 'post', $redirect = true)
+            {
+            }
+
+            public function setRedirect($url, $msg = null, $type = null)
+            {
+            }
+
+            public function getDispatcher()
+            {
+            }
+
+            public function setDispatcher($dispatcher)
+            {
+            }
+
+            public function setLogger($logger)
+            {
+            }
+        }
+    }
+}
+
 namespace {
     if (!class_exists('JLoader')) {
         class JLoader

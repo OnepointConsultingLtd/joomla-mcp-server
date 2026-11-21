@@ -22,9 +22,11 @@ class Dispatcher extends ComponentDispatcher
         // This override replaces ComponentDispatcher::dispatch() wholesale, so
         // the base class's access gate has to be reinstated explicitly. Without
         // it any account holding only core.login.admin could open
-        // view=dashboard and read the request log. The site dispatcher is a
-        // separate class and is deliberately not gated: it serves the public
-        // JSON-RPC endpoint, which authenticates per request instead.
+        // view=dashboard and read the request log. Front-end requests come
+        // through this same dispatcher (Joomla boots the component only from
+        // the administrator provider), and checkAccess() deliberately lets
+        // them through: they serve the public JSON-RPC endpoint and OAuth
+        // sign-in, which authenticate per request instead.
         $this->checkAccess();
 
         $task = $this->input->get('task', '');

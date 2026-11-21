@@ -19,6 +19,7 @@ use Joomla\CMS\Log\Log;
 use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 use Joomla\CMS\Toolbar\ToolbarHelper;
 use Joomla\CMS\Uri\Uri;
+use Joomla\CMS\User\User;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
 use Joomla\Component\Mcpserver\Administrator\Service\ComponentOptionsAccess;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
@@ -239,6 +240,17 @@ class HtmlView extends BaseHtmlView
             $app->setUserState('com_mcpserver.credentials.issued', null);
         }
 
+        $this->buildToolbar($user);
+
+        parent::display($tpl);
+    }
+
+    /**
+     * Not named addToolbar(): Joomla's FormView and ListView declare that
+     * without parameters, and this one needs the user it is built for.
+     */
+    protected function buildToolbar(User $user): void
+    {
         ToolbarHelper::title(Text::_('COM_MCPSERVER_CREDENTIALS_TITLE'), 'key');
 
         // This page has no submenu entry — it is conditional on Governed Mode,
@@ -260,8 +272,6 @@ class HtmlView extends BaseHtmlView
         if (ComponentOptionsAccess::allows($user)) {
             ToolbarHelper::preferences('com_mcpserver');
         }
-
-        parent::display($tpl);
     }
 
     /**

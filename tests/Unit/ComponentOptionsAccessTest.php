@@ -12,70 +12,40 @@ namespace Joomla\Component\Mcpserver\Tests\Unit;
 
 defined('_JEXEC') or die;
 
-use Joomla\CMS\User\User;
 use Joomla\Component\Mcpserver\Administrator\Service\ComponentOptionsAccess;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The gate on the Credentials page's Options button: it must match what
- * com_config itself allows, so the button is shown to exactly the users who
- * can open the component Options.
+ * Who may open the component's Options: the same test com_config applies.
+ * CredentialsToolbarTest checks the Credentials page uses it for its Options
+ * button.
  */
 final class ComponentOptionsAccessTest extends TestCase
 {
-    /**
-     * @param list<string> $granted Actions the user holds on com_mcpserver.
-     */
-    private static function user(array $granted): User
-    {
-        return new class ($granted) extends User {
-            /** @param list<string> $granted */
-            public function __construct(private array $granted)
-            {
-            }
-
-            public function authorise($action, $assetname = null): bool
-            {
-                return $assetname === 'com_mcpserver' && in_array($action, $this->granted, true);
-            }
-        };
-    }
-
     public function testUserGrantedConfigureOptionsMayOpenOptions(): void
     {
-        $this->assertTrue(ComponentOptionsAccess::allows(self::user(['core.options', 'mcpserver.credential.self'])));
+        $this->assertTrue(ComponentOptionsAccess::allows(FakeUser::granted('core.options', 'mcpserver.credential.self')));
     }
 
     public function testUserGrantedConfigureAclAndOptionsMayOpenOptions(): void
     {
         // Site-wide core.admin (Super Users) inherits to the component, so this
         // is also the existing behaviour for them.
-        $this->assertTrue(ComponentOptionsAccess::allows(self::user(['core.admin'])));
+        $this->assertTrue(ComponentOptionsAccess::allows(FakeUser::granted('core.admin')));
     }
 
     public function testManageOwnCredentialsAloneDoesNotOpenOptions(): void
     {
-        $this->assertFalse(ComponentOptionsAccess::allows(self::user(['mcpserver.credential.self'])));
+        $this->assertFalse(ComponentOptionsAccess::allows(FakeUser::granted('mcpserver.credential.self')));
     }
 
     public function testAccessAdministrationInterfaceAloneDoesNotOpenOptions(): void
     {
-        $this->assertFalse(ComponentOptionsAccess::allows(self::user(['core.manage', 'mcpserver.credential.audit'])));
+        $this->assertFalse(ComponentOptionsAccess::allows(FakeUser::granted('core.manage', 'mcpserver.credential.audit')));
     }
 
     public function testNoUserDoesNotOpenOptions(): void
     {
         $this->assertFalse(ComponentOptionsAccess::allows(null));
-    }
-
-    public function testCredentialsPageGatesItsOptionsButtonOnThisCheck(): void
-    {
-        $source = (string) file_get_contents(__DIR__ . '/../../admin/src/View/Credentials/HtmlView.php');
-
-        $this->assertMatchesRegularExpression(
-            '/if \(ComponentOptionsAccess::allows\(\$user\)\) \{\s*ToolbarHelper::preferences\(\'com_mcpserver\'\);/',
-            $source,
-            'The Credentials page Options button must be shown to exactly the users ComponentOptionsAccess allows.'
-        );
     }
 }

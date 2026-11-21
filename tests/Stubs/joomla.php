@@ -820,6 +820,44 @@ namespace Joomla\CMS\MVC\Controller {
     }
 }
 
+namespace Joomla\CMS\MVC\View {
+    if (!class_exists(HtmlView::class)) {
+        /**
+         * Lets the component's views load, so a test can drive the parts of a
+         * view that decide what the page shows (its toolbar, for example).
+         */
+        class HtmlView
+        {
+            public function __construct(array $config = [])
+            {
+            }
+
+            public function display($tpl = null)
+            {
+            }
+        }
+    }
+}
+
+namespace Joomla\CMS\Toolbar {
+    if (!class_exists(ToolbarHelper::class)) {
+        /**
+         * Records the toolbar buttons a view adds, as [method, arguments], in
+         * the order it adds them.
+         */
+        class ToolbarHelper
+        {
+            /** @var list<array{0:string,1:list<mixed>}> */
+            public static array $calls = [];
+
+            public static function __callStatic(string $method, array $arguments): void
+            {
+                self::$calls[] = [$method, $arguments];
+            }
+        }
+    }
+}
+
 namespace Joomla\Input {
     if (!class_exists(Input::class)) {
         /**

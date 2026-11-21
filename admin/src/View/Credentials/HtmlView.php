@@ -19,15 +19,19 @@ use Joomla\CMS\Log\Log;
 use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 use Joomla\CMS\Toolbar\ToolbarHelper;
 use Joomla\CMS\Uri\Uri;
+use Joomla\CMS\User\User;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
+use Joomla\Component\Mcpserver\Administrator\Service\ComponentOptionsAccess;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialRequestService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceSetupService;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
 
 /**
  * Self-service credential request and lifecycle view. Users request access,
- * then claim an approved request with their own Joomla API token. It never
+ * then claim an approved request, which binds their own Joomla API token
+ * without them handling it. It never
  * renders a stored/previously issued token; only the token returned by the
  * claim action, held in user state for exactly one redirect, is plaintext.
  *
@@ -53,6 +57,9 @@ class HtmlView extends BaseHtmlView
 
     /** @var array{id:string,bearer_token:string}|null */
     public $justIssued = null;
+
+    /** Whether MCP clients can sign in with OAuth, which makes a bearer token unnecessary for them. */
+    public bool $oauthEnabled = false;
 
     /**
      * True once CredentialLifecycleService can be resolved, i.e. a valid
@@ -227,11 +234,23 @@ class HtmlView extends BaseHtmlView
         // rendered: the plaintext bearer token exists nowhere else, so clearing
         // it on a page that cannot display it destroys it permanently.
         $this->justIssued = $app->getUserState('com_mcpserver.credentials.issued');
+        $this->oauthEnabled = OAuthConfig::isEnabled(ComponentHelper::getParams('com_mcpserver'));
 
         if ($this->justIssued !== null && $this->governedConfigured) {
             $app->setUserState('com_mcpserver.credentials.issued', null);
         }
 
+        $this->buildToolbar($user);
+
+        parent::display($tpl);
+    }
+
+    /**
+     * Not named addToolbar(): Joomla's FormView and ListView declare that
+     * without parameters, and this one needs the user it is built for.
+     */
+    protected function buildToolbar(User $user): void
+    {
         ToolbarHelper::title(Text::_('COM_MCPSERVER_CREDENTIALS_TITLE'), 'key');
 
         // This page has no submenu entry — it is conditional on Governed Mode,
@@ -246,14 +265,13 @@ class HtmlView extends BaseHtmlView
         );
 
         // Match the other two views, but only for users who can actually use
-        // it: this page is self-service, so a non-admin holder of
+        // it: this page is self-service, so a user granted only
         // mcpserver.credential.self must not be offered a component-wide
-        // configuration button they cannot open.
-        if ($this->isCoreAdmin) {
+        // configuration button com_config will refuse. A group delegated
+        // Configure Options (without site-wide admin) does get it.
+        if (ComponentOptionsAccess::allows($user)) {
             ToolbarHelper::preferences('com_mcpserver');
         }
-
-        parent::display($tpl);
     }
 
     /**

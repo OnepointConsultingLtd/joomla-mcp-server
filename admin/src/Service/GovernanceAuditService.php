@@ -28,7 +28,7 @@ use Joomla\Registry\Registry;
  * and the admin-triggered prune lives in GovernanceAuditRetentionService.
  *
  * Attribution columns (credential_id, user_id, credential_selector) are
- * nullable: requests made under the legacy shared-token mode, or requests
+ * nullable: requests made in shared-token mode, or requests
  * that fail authentication before a principal is resolved, are recorded
  * with null attribution rather than being dropped. The row never carries a
  * token, secret, or arbitrary request/response content — only caller-supplied

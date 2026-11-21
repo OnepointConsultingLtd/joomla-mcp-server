@@ -288,13 +288,13 @@ final class RpcHandlerGovernanceAuditTest extends TestCase
         $this->assertCount(0, $calls, 'a policy-blocked mutation must never produce an Action Log entry');
     }
 
-    public function testLegacyNullPrincipalStillAuditsSafelyWithoutActionLog(): void
+    public function testSharedTokenModeNullPrincipalStillAuditsSafelyWithoutActionLog(): void
     {
         ['host' => $host, 'db' => $db, 'calls' => $calls] = $this->boot();
 
         $this->recordGovernanceAudit($host, 'ok', 'update_article', null);
 
-        $this->assertTrue($db->executed, 'legacy shared-token requests must still be audited');
+        $this->assertTrue($db->executed, 'shared-token mode requests must still be audited');
         $this->assertNotNull($db->lastQuery);
 
         $values = explode(',', $db->lastQuery->insertValues);

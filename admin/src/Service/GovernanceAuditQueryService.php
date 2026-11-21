@@ -175,7 +175,7 @@ final class GovernanceAuditQueryService
      * Drawn from the log rather than from #__users because the filter's job
      * is to narrow these rows: listing every account on the site would offer
      * mostly choices that return nothing, and on a large site would be
-     * unusable. Rows with a null user_id (legacy shared-token mode, or a
+     * unusable. Rows with a null user_id (shared-token mode, or a
      * failure before a principal was resolved) belong to no account and are
      * excluded — they are reached by not filtering, not by picking a user.
      *

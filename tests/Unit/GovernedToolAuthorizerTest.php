@@ -96,10 +96,10 @@ final class GovernedToolAuthorizerTest extends TestCase
         $this->assertTrue($response['result']['isError']);
     }
 
-    public function testLegacyServiceDoesNotApplyGovernedAcl(): void
+    public function testServiceWithoutPrincipalDoesNotApplyGovernedAcl(): void
     {
         $this->installCacheEnvironment(['page']);
-        $service = $this->makeLegacyService();
+        $service = $this->makeServiceWithoutPrincipal();
 
         $response = $this->callTool($service, 'clear_cache', ['client' => 'site']);
 
@@ -245,10 +245,10 @@ final class GovernedToolAuthorizerTest extends TestCase
         );
     }
 
-    public function testExtensionStateExecutorAllowsNonPluginInLegacyMode(): void
+    public function testExtensionStateExecutorAllowsNonPluginInSharedTokenMode(): void
     {
         // The plugin-only restriction exists because GovernedToolAuthorizer can
-        // only resolve an ACL asset for a plugin row. Legacy shared-token mode
+        // only resolve an ACL asset for a plugin row. Shared-token mode
         // has no such mapping, and the tool's schema advertises every extension
         // type, so the restriction must not leak into it.
         $service = $this->makeService();
@@ -424,7 +424,7 @@ final class GovernedToolAuthorizerTest extends TestCase
         return $this->makeService($rest, $registry, new AuthenticatedPrincipal(1, 'selector', 7, 'Client', 'token'), $authorizer);
     }
 
-    private function makeLegacyService(): RpcService
+    private function makeServiceWithoutPrincipal(): RpcService
     {
         return $this->makeService();
     }
@@ -567,7 +567,7 @@ final class GovernedToolAuthorizerTest extends TestCase
     public function testArticleDirectOperationDeniesEditOwnForANonOwner(): void
     {
         // core.edit.own must only apply to the principal's own content. Without
-        // this, any holder of core.edit.own reaches every article on the site.
+        // this, any user granted core.edit.own reaches every article on the site.
         $user = $this->user(true, [['core.edit.own', 'com_content.article.19']]);
         $authorizer = new GovernedToolAuthorizer(
             new ToolAccessPolicy(),

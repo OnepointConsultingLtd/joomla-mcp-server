@@ -11,8 +11,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Extract version from manifest
 VERSION=$(grep -oP '<version>\K[^<]+' "$SCRIPT_DIR/mcpserver.xml")
-PACKAGE="${COMPONENT}-${VERSION}.zip"
+# The release is a Joomla package: the component plus the system plugin that
+# serves the OAuth URLs. mcpserver.xml stays the version source of truth; the
+# package and plugin manifests are synced to it below.
+PACKAGE="pkg_mcpserver-${VERSION}.zip"
 BUILD_DIR="$SCRIPT_DIR/build"
+COMPONENT_DIR="$BUILD_DIR/com_mcpserver"
+PLUGIN_DIR="$BUILD_DIR/plg_system_mcpserver"
+PKG_DIR="$BUILD_DIR/pkg_mcpserver"
 
 echo "Building ${COMPONENT} v${VERSION}..."
 
@@ -25,6 +31,12 @@ if [[ -f "$README_PATH" ]]; then
         echo "Updated README version: ${CURRENT_README_VERSION} → ${VERSION}"
     fi
 fi
+
+# Sync the package and plugin manifests to the same version, in place, so the
+# committed files never drift from mcpserver.xml (PackageManifestTest checks it)
+for EXTRA_MANIFEST in "$SCRIPT_DIR/pkg_mcpserver.xml" "$SCRIPT_DIR/plugins/system/mcpserver/mcpserver.xml"; do
+    sed -i -E "s#<version>[^<]+</version>#<version>${VERSION}</version>#" "$EXTRA_MANIFEST"
+done
 
 # Sync the Joomla updater feed: prepend an <update> entry for this version
 # (newest first) if one isn't already present, including infourl, tags, and
@@ -46,16 +58,17 @@ fi
 
 # Clean previous build
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+mkdir -p "$COMPONENT_DIR" "$PKG_DIR/packages"
 
 # Copy manifest and install script
-cp "$SCRIPT_DIR/mcpserver.xml" "$BUILD_DIR/"
-cp "$SCRIPT_DIR/script.php" "$BUILD_DIR/"
+cp "$SCRIPT_DIR/mcpserver.xml" "$COMPONENT_DIR/"
+cp "$SCRIPT_DIR/script.php" "$COMPONENT_DIR/"
 
 # Copy release documentation required by distribution channels
 for RELEASE_FILE in LICENSE README.md CHANGELOG.md SECURITY.md update.xml changelog.xml; do
     if [[ -f "$SCRIPT_DIR/$RELEASE_FILE" ]]; then
-        cp "$SCRIPT_DIR/$RELEASE_FILE" "$BUILD_DIR/"
+        cp "$SCRIPT_DIR/$RELEASE_FILE" "$COMPONENT_DIR/"
+        cp "$SCRIPT_DIR/$RELEASE_FILE" "$PKG_DIR/"
     fi
 done
 
@@ -63,25 +76,28 @@ done
 composer install --no-dev --optimize-autoloader --working-dir="$SCRIPT_DIR/admin" --quiet
 
 # Copy admin files
-rsync -a --exclude='.DS_Store' --exclude='composer.lock' "$SCRIPT_DIR/admin/" "$BUILD_DIR/admin/"
+rsync -a --exclude='.DS_Store' --exclude='composer.lock' "$SCRIPT_DIR/admin/" "$COMPONENT_DIR/admin/"
 
 # Copy site files
-rsync -a --exclude='.DS_Store' "$SCRIPT_DIR/site/" "$BUILD_DIR/site/"
+rsync -a --exclude='.DS_Store' "$SCRIPT_DIR/site/" "$COMPONENT_DIR/site/"
+
+# The system plugin (its manifest version was synced above)
+rsync -a --exclude='.DS_Store' "$SCRIPT_DIR/plugins/system/mcpserver/" "$PLUGIN_DIR/"
 
 # Ship the MCPB template, icon and bridge so the admin can generate personalised
 # bundles without depending on the site-installed bridge file
-mkdir -p "$BUILD_DIR/admin/mcpb/server"
-sed "s/__VERSION__/${VERSION}/" "$SCRIPT_DIR/mcpb/manifest.json" > "$BUILD_DIR/admin/mcpb/manifest.json"
-cp "$SCRIPT_DIR/assets/logo.png" "$BUILD_DIR/admin/mcpb/icon.png"
-cp "$SCRIPT_DIR/site/mcp-http-bridge.js" "$BUILD_DIR/admin/mcpb/server/mcp-http-bridge.js"
+mkdir -p "$COMPONENT_DIR/admin/mcpb/server"
+sed "s/__VERSION__/${VERSION}/" "$SCRIPT_DIR/mcpb/manifest.json" > "$COMPONENT_DIR/admin/mcpb/manifest.json"
+cp "$SCRIPT_DIR/assets/logo.png" "$COMPONENT_DIR/admin/mcpb/icon.png"
+cp "$SCRIPT_DIR/site/mcp-http-bridge.js" "$COMPONENT_DIR/admin/mcpb/server/mcp-http-bridge.js"
 
 # JED Checker: strip vendor leftovers and patch JAMSS/framework false positives
 python3 "$SCRIPT_DIR/scripts/prepare_vendor_for_jed.py" \
-    "$BUILD_DIR/admin/vendor" \
-    "$BUILD_DIR/admin/src"
+    "$COMPONENT_DIR/admin/vendor" \
+    "$COMPONENT_DIR/admin/src"
 
 # JED Checker requires GPL-compatible licence notices in bundled vendor PHP files
-python3 "$SCRIPT_DIR/scripts/add_vendor_license_headers.py" "$BUILD_DIR/admin/vendor"
+python3 "$SCRIPT_DIR/scripts/add_vendor_license_headers.py" "$COMPONENT_DIR/admin/vendor"
 
 # The JED-prep scripts rewrite PHP source; fail the build if any rewrite broke syntax
 find "$BUILD_DIR" -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
@@ -110,14 +126,17 @@ for ($i = 0; $i < 200; $i++) {
         exit(1);
     }
 }
-' "$BUILD_DIR/admin/src/Service"
+' "$COMPONENT_DIR/admin/src/Service"
 echo "Packaged credential encoding check passed"
 
-# Create the zip package
+# Zip the component and the plugin into the package, then the package itself
+(cd "$COMPONENT_DIR" && zip -rq "$PKG_DIR/packages/com_mcpserver.zip" . -x '*.git*')
+(cd "$PLUGIN_DIR" && zip -rq "$PKG_DIR/packages/plg_system_mcpserver.zip" . -x '*.git*')
+cp "$SCRIPT_DIR/pkg_mcpserver.xml" "$PKG_DIR/"
+cp "$SCRIPT_DIR/script.pkg.php" "$PKG_DIR/"
+
 rm -f "$SCRIPT_DIR/$PACKAGE"
-cd "$BUILD_DIR"
-zip -rq "$SCRIPT_DIR/$PACKAGE" . -x '*.git*'
-cd "$SCRIPT_DIR"
+(cd "$PKG_DIR" && zip -rq "$SCRIPT_DIR/$PACKAGE" . -x '*.git*')
 
 # Clean up
 rm -rf "$BUILD_DIR"

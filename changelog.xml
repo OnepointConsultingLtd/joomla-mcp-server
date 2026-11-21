@@ -1,6 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <changelogs>
     <changelog>
+        <element>pkg_mcpserver</element>
+        <type>package</type>
+        <version>1.12.0</version>
+        <addition>
+            <item>Added a Permissions tab to the component Options. The Manage Own Credentials and View Credential Audit actions could not be granted to any user group before, so the self-service Credentials page was only reachable for users with Access Administration Interface (core.manage). The tab also lets you delegate Configure ACL &amp; Options, the new Configure Options (Options without permissions) and Access Administration Interface for this component alone. Users granted Access Administration Interface can revoke other users' credentials. Approving, rejecting and deleting credentials, and pruning the audit trail, still require a Super User.</item>
+            <item>Added OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web. The client is given only the endpoint URL. It registers itself (Dynamic Client Registration) or identifies itself with a Client ID Metadata Document, the user signs in to the site and chooses one of their Governed Mode credentials, and the client then acts as that credential, with its approval, expiry, revocation and audit trail. Turn it on with OAuth Sign-in in Options → Security Settings (needs Governed Mode).</item>
+            <item>Added the System - MCP Server plugin. It serves the OAuth discovery documents at /.well-known/ and the /mcp-oauth/ endpoints, and does nothing while OAuth Sign-in is off.</item>
+            <item>Added a WWW-Authenticate header to HTTP 401 responses from the MCP endpoint while OAuth Sign-in is on, pointing OAuth-capable clients at the site's Protected Resource Metadata.</item>
+        </addition>
+        <fix>
+            <item>Fixed the component's front-end files never being installed. The manifest nested them in a &lt;site&gt; element, which Joomla ignores, so components/com_mcpserver/ was missing on every site: the stdio bridge was not at components/com_mcpserver/mcp-http-bridge.js as documented, and the server icon advertised to MCP clients returned 404. Installing 1.12.0 adds them.</item>
+        </fix>
+        <change>
+            <item>Releases are now the pkg_mcpserver-&lt;version&gt;.zip package, which installs the component and the plugin together. Sites on 1.11.x are offered it as a component update; it installs over the existing component, keeping settings and data, and later updates come through the package.</item>
+            <item>Super Users can now approve or reject their own credential requests. Previously a second Super User had to decide them, so a site with a single administrator could not issue itself a credential. The decision is still recorded against the approver in the request audit trail.</item>
+            <item>The Legacy Shared API Token option is now called Shared Joomla API Token. Its stored value is unchanged.</item>
+            <item>The Authorization header's Bearer scheme is now accepted in any letter case (bearer, BEARER), as RFC 7235 requires, in shared-token mode and Governed Mode, and for OAuth access tokens. Previously only Bearer was accepted.</item>
+            <item>After approving an MCP client on the OAuth consent page, the user now sees a confirmation page in the site's template naming the client, the site and themselves, which then returns them to the client automatically or through a Continue button. Previously the browser went straight to the client's own page, which for a CLI client is often a bare line of text. Denying, and requests the site refuses, still return straight to the client.</item>
+        </change>
+    </changelog>
+    <changelog>
+        <element>com_mcpserver</element>
+        <type>component</type>
+        <version>1.12.0</version>
+        <addition>
+            <item>Added a Permissions tab to the component Options. The Manage Own Credentials and View Credential Audit actions could not be granted to any user group before, so the self-service Credentials page was only reachable for users with Access Administration Interface (core.manage). The tab also lets you delegate Configure ACL &amp; Options, the new Configure Options (Options without permissions) and Access Administration Interface for this component alone. Users granted Access Administration Interface can revoke other users' credentials. Approving, rejecting and deleting credentials, and pruning the audit trail, still require a Super User.</item>
+            <item>Added OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web. The client is given only the endpoint URL. It registers itself (Dynamic Client Registration) or identifies itself with a Client ID Metadata Document, the user signs in to the site and chooses one of their Governed Mode credentials, and the client then acts as that credential, with its approval, expiry, revocation and audit trail. Turn it on with OAuth Sign-in in Options → Security Settings (needs Governed Mode).</item>
+            <item>Added the System - MCP Server plugin. It serves the OAuth discovery documents at /.well-known/ and the /mcp-oauth/ endpoints, and does nothing while OAuth Sign-in is off.</item>
+            <item>Added a WWW-Authenticate header to HTTP 401 responses from the MCP endpoint while OAuth Sign-in is on, pointing OAuth-capable clients at the site's Protected Resource Metadata.</item>
+        </addition>
+        <fix>
+            <item>Fixed the component's front-end files never being installed. The manifest nested them in a &lt;site&gt; element, which Joomla ignores, so components/com_mcpserver/ was missing on every site: the stdio bridge was not at components/com_mcpserver/mcp-http-bridge.js as documented, and the server icon advertised to MCP clients returned 404. Installing 1.12.0 adds them.</item>
+        </fix>
+        <change>
+            <item>Releases are now the pkg_mcpserver-&lt;version&gt;.zip package, which installs the component and the plugin together. Sites on 1.11.x are offered it as a component update; it installs over the existing component, keeping settings and data, and later updates come through the package.</item>
+            <item>Super Users can now approve or reject their own credential requests. Previously a second Super User had to decide them, so a site with a single administrator could not issue itself a credential. The decision is still recorded against the approver in the request audit trail.</item>
+            <item>The Legacy Shared API Token option is now called Shared Joomla API Token. Its stored value is unchanged.</item>
+            <item>The Authorization header's Bearer scheme is now accepted in any letter case (bearer, BEARER), as RFC 7235 requires, in shared-token mode and Governed Mode, and for OAuth access tokens. Previously only Bearer was accepted.</item>
+            <item>After approving an MCP client on the OAuth consent page, the user now sees a confirmation page in the site's template naming the client, the site and themselves, which then returns them to the client automatically or through a Continue button. Previously the browser went straight to the client's own page, which for a CLI client is often a bare line of text. Denying, and requests the site refuses, still return straight to the client.</item>
+        </change>
+    </changelog>
+    <changelog>
         <element>com_mcpserver</element>
         <type>component</type>
         <version>1.11.1</version>

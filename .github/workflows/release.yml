@@ -40,7 +40,7 @@ jobs:
         run: |
           VERSION="$(grep -oP '<version>\K[^<]+' mcpserver.xml)"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "package=com_mcpserver-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "package=pkg_mcpserver-${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Extract release notes
         id: notes

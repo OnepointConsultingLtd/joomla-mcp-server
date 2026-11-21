@@ -18,7 +18,9 @@ use Joomla\CMS\Uri\Uri;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthenticatedPrincipal;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
+use Joomla\Component\Mcpserver\Administrator\Service\AuthorizationHeader;
 use Joomla\Component\Mcpserver\Administrator\Service\CacheService;
+use Joomla\Component\Mcpserver\Administrator\Service\ComponentTaskUrl;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceAuditService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernedToolAuthorizer;
 use Joomla\Component\Mcpserver\Administrator\Service\HttpProgressSink;
@@ -29,6 +31,9 @@ use Joomla\Component\Mcpserver\Administrator\Service\McpHttpTransport;
 use Joomla\Component\Mcpserver\Administrator\Service\McpProtocolError;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServer;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServiceFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadException;
 use Joomla\Component\Mcpserver\Administrator\Service\PackageUploadService;
 use Joomla\Component\Mcpserver\Administrator\Service\PolicyService;
@@ -67,7 +72,7 @@ trait RpcHandlerTrait
 
         // Throttle stream establishment before auth: each SSE connection holds a
         // PHP worker for the lifetime below, so unbounded opens are a DoS vector.
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Content-Type: application/json; charset=utf-8');
@@ -94,6 +99,7 @@ trait RpcHandlerTrait
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             header('Content-Type: application/json; charset=utf-8');
+            $this->sendOAuthChallenge($params, $authError);
             http_response_code($authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
             $this->recordGovernanceAudit(
@@ -116,7 +122,8 @@ trait RpcHandlerTrait
         $sessionId = bin2hex(random_bytes(16));
         // Bound to this principal's credential so a response posted under a
         // different governed credential (even with the same sessionId) is
-        // never delivered here. Legacy (null-principal) sessions are unaffected.
+        // never delivered here. Shared-token mode (null-principal) sessions are
+        // unaffected.
         $cacheKey = PrincipalCache::sessionKeyFor($sessionId, $principal);
 
         header('Content-Type: text/event-stream');
@@ -124,7 +131,7 @@ trait RpcHandlerTrait
         header('Connection: keep-alive');
         header('X-Accel-Buffering: no');
 
-        $postUrl = Uri::root() . 'index.php?option=com_mcpserver&task=rpc.handle&sessionId=' . $sessionId;
+        $postUrl = ComponentTaskUrl::mcpEndpoint(Uri::root()) . '&sessionId=' . $sessionId;
 
         echo "event: endpoint\n";
         echo "data: " . $postUrl . "\n\n";
@@ -230,7 +237,7 @@ trait RpcHandlerTrait
 
         // Rate limit BEFORE authentication so failed auth attempts (bearer-token
         // guessing) are throttled too. Keyed on the proxy-aware client IP.
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Retry-After: ' . $rateLimit['retry_after']);
@@ -251,11 +258,13 @@ trait RpcHandlerTrait
         // Resolve the principal first: a governed-mode credential authenticates
         // successfully as an AuthenticatedPrincipal, never as an error array, so
         // authenticate() below is only reached (and only touches credential state)
-        // on the non-principal paths (legacy mode, or a failed/absent credential).
+        // on the non-principal paths (shared-token mode, or a failed/absent
+        // credential).
         $principal = $authService->authenticatePrincipal();
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
+            $this->sendOAuthChallenge($params, $authError);
             http_response_code($code);
             echo json_encode(JsonRpc::errorResponse(null, $authError['code'], $authError['error']));
             $this->recordGovernanceAudit($startTime, '', '', 'auth_failed', $authError['code'], $code, $clientIp, $context, null, null, null, $headerVersion);
@@ -418,8 +427,8 @@ trait RpcHandlerTrait
         if (!empty($sessionId)) {
             $sseCache = new JoomlaCache('mcp_sse');
             // Same principal-bound key derivation as sse()'s poller, so only the
-            // matching authenticated principal (or a legacy null principal) can
-            // retrieve this response for this sessionId.
+            // matching authenticated principal (or, in shared-token mode, the
+            // null principal) can retrieve this response for this sessionId.
             $sseCache->set(PrincipalCache::sessionKeyFor($sessionId, $principal), $jsonResponse, 30);
             http_response_code(202);
             echo json_encode(['status' => 'accepted', 'sessionId' => $sessionId]);
@@ -471,7 +480,7 @@ trait RpcHandlerTrait
         $authService = $this->resolveService(AuthService::class) ?? new AuthService($params);
         $clientIp    = $authService->getClientIp() ?: 'unknown';
 
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Retry-After: ' . $rateLimit['retry_after']);
@@ -488,6 +497,7 @@ trait RpcHandlerTrait
         $authError = $principal !== null ? null : $authService->authenticate();
         if ($authError !== null) {
             $code = $authError['code'] === JsonRpc::UNAUTHORIZED ? 401 : 403;
+            $this->sendOAuthChallenge($params, $authError);
             $this->rejectUpload($startTime, $code, $authError['code'], $authError['error'], 'auth_failed', $clientIp, $context, null);
             return;
         }
@@ -769,12 +779,47 @@ trait RpcHandlerTrait
         // without them here, browser-based clients fail CORS preflight.
         header('Access-Control-Allow-Headers: Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
         header('Access-Control-Max-Age: 3600');
+        // So a browser-based client can read the OAuth challenge on a 401.
+        header('Access-Control-Expose-Headers: WWW-Authenticate');
 
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
             header('Content-Length: 0');
             http_response_code(204);
             Factory::getApplication()->close();
         }
+    }
+
+    /**
+     * On a 401, points an OAuth-capable MCP client at this site's Protected
+     * Resource Metadata (RFC 9728 §5.1), which is how clients such as
+     * ChatGPT and Claude discover that they can sign in here.
+     *
+     * Site context only: the authorisation flow signs users in to the site.
+     * The resource named is the URL the client actually called, reduced to
+     * its option/task, so the metadata matches the server URL it was given.
+     *
+     * @param array{error:string,code:int} $authError
+     */
+    private function sendOAuthChallenge(Registry $params, array $authError): void
+    {
+        $app = Factory::getApplication();
+        if ($authError['code'] !== JsonRpc::UNAUTHORIZED || $app->getName() !== 'site' || !OAuthConfig::isEnabled($params)) {
+            return;
+        }
+
+        $uri = clone Uri::getInstance();
+        $uri->setQuery(array_intersect_key($uri->getQuery(true), ['option' => true, 'task' => true]));
+        $resource = $uri->toString(['scheme', 'user', 'pass', 'host', 'port', 'path', 'query']);
+
+        $config = OAuthServiceFactory::config($params);
+        $challenge = 'Bearer resource_metadata="' . $config->protectedResourceMetadataUrl($resource) . '", scope="' . OAuthServer::SCOPE . '"';
+
+        // RFC 6750 §3.1: no error code when no credentials were sent at all.
+        if (AuthorizationHeader::read($app->input->server) !== '') {
+            $challenge .= ', error="invalid_token"';
+        }
+
+        header('WWW-Authenticate: ' . $challenge);
     }
 
     /**
@@ -932,9 +977,9 @@ trait RpcHandlerTrait
      * write is logged at critical: silently losing the row would destroy the
      * accountability guarantee that is this feature's entire purpose. Note both
      * run before the success response is echoed, so they add latency to the
-     * request. A legacy null principal is still audited (with null attribution)
-     * but never emits an Action Log entry — there is no Joomla user to
-     * attribute it to.
+     * request. A null principal (shared-token mode) is still audited (with
+     * null attribution) but never emits an Action Log entry — there is no
+     * Joomla user to attribute it to.
      */
     private function recordGovernanceAudit(
         float $startTime,
@@ -1012,19 +1057,6 @@ trait RpcHandlerTrait
     }
 
     /**
-     * Fallback: create RateLimiter when DI container is not available.
-     */
-    private function createRateLimiter(Registry $params): RateLimiter
-    {
-        $cacheBackend = new JoomlaCache('com_mcpserver_ratelimit');
-        return new RateLimiter(
-            $cacheBackend,
-            (int) $params->get('rate_limit_requests', 60),
-            (int) $params->get('rate_limit_window', 60)
-        );
-    }
-
-    /**
      * Fallback: create RpcService when DI container is not available.
      */
     private function createRpcService(Registry $params): RpcService
@@ -1063,7 +1095,8 @@ trait RpcHandlerTrait
         $cacheBackend = new JoomlaCache('com_mcpserver');
         // Governed mode: namespace the request-local RpcService cache by the
         // authenticated user so distinct governed users never observe each
-        // other's cached results. Legacy (null principal) is unaffected.
+        // other's cached results. Shared-token mode (null principal) is
+        // unaffected.
         $cache = new CacheService(new PrincipalCache($cacheBackend, $principal), $cacheTtl);
         $policy = new PolicyService(ComponentHelper::getParams('com_mcpserver'));
         $toolRegistry = new ToolRegistry();

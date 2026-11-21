@@ -46,8 +46,11 @@ use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCache;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialLifecycleStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialRequestStore;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaCredentialStore;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthConfig;
+use Joomla\Component\Mcpserver\Administrator\Service\OAuthServiceFactory;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
 use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenOwnershipValidator;
+use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenProvisioner;
 use Joomla\Component\Mcpserver\Administrator\Service\McpbService;
 use Joomla\Component\Mcpserver\Administrator\Service\MetricsService;
 use Joomla\Component\Mcpserver\Administrator\Service\MonologFactory;
@@ -116,7 +119,12 @@ return new class implements ServiceProviderInterface {
         $container->share(JoomlaApiTokenOwnershipValidator::class, function () {
             return new JoomlaApiTokenOwnershipValidator(
                 Factory::getDbo(),
-                static fn (): string => (string) Factory::getApplication()->get('secret', '')
+                static fn (): string => (string) Factory::getApplication()->get('secret', ''),
+                // The algorithm plg_user_token issues with, so a claimed
+                // credential carries the same token the owner's account shows.
+                static fn (): string => JoomlaApiTokenOwnershipValidator::algorithmFromFormFile(
+                    JPATH_PLUGINS . '/user/token/forms/token.xml'
+                )
             );
         });
 
@@ -129,11 +137,22 @@ return new class implements ServiceProviderInterface {
             );
         });
 
+        // Creates a Joomla API token seed at claim for an owner who has none,
+        // only where plg_user_token would let them hold one.
+        $container->share(JoomlaApiTokenProvisioner::class, function (Container $container) {
+            return new JoomlaApiTokenProvisioner(
+                Factory::getDbo(),
+                $container->get(JoomlaApiTokenAvailability::class),
+                static fn (int $length): string => random_bytes($length)
+            );
+        });
+
         $container->share(CredentialRequestService::class, function (Container $container) {
             return new CredentialRequestService(
                 $container->get(JoomlaCredentialRequestStore::class),
                 $container->get(CredentialCipher::class),
                 $container->get(JoomlaApiTokenOwnershipValidator::class),
+                $container->get(JoomlaApiTokenProvisioner::class),
                 static fn (): int => time()
             );
         });
@@ -151,11 +170,16 @@ return new class implements ServiceProviderInterface {
 
         // Governed-mode auth service
         $container->share(GovernedAuthService::class, function (Container $container) {
+            $params = ComponentHelper::getParams('com_mcpserver');
+
             return new GovernedAuthService(
                 $container->get(GovernedCredentialAuthenticator::class),
-                static function (string $name, string $default): string {
-                    return Factory::getApplication()->input->server->getString($name, $default);
-                }
+                Factory::getApplication()->input->server,
+                // OAuth access tokens are accepted only while OAuth is switched
+                // on, so turning it off ends all OAuth access at once.
+                OAuthConfig::isEnabled($params)
+                    ? OAuthServiceFactory::accessTokenAuthenticator(Uri::getInstance()->toString(), $params)
+                    : null
             );
         });
 
@@ -167,7 +191,7 @@ return new class implements ServiceProviderInterface {
                 $governedAuthService = $container->get(GovernedAuthService::class);
             } catch (\RuntimeException) {
                 // Governed key material is not yet provisioned (e.g. empty or
-                // malformed credential_salt). Fail closed: legacy mode keeps
+                // malformed credential_salt). Fail closed: shared-token mode keeps
                 // working; governed mode reports "not configured" at request time.
                 $governedAuthService = null;
             }
@@ -214,13 +238,7 @@ return new class implements ServiceProviderInterface {
 
         // Rate limiter
         $container->share(RateLimiter::class, function () {
-            $params = ComponentHelper::getParams('com_mcpserver');
-            $cacheBackend = new JoomlaCache('com_mcpserver_ratelimit');
-            return new RateLimiter(
-                $cacheBackend,
-                (int) $params->get('rate_limit_requests', 60),
-                (int) $params->get('rate_limit_window', 60)
-            );
+            return RateLimiter::fromParams(ComponentHelper::getParams('com_mcpserver'));
         });
 
         // Metrics service
@@ -230,7 +248,7 @@ return new class implements ServiceProviderInterface {
 
         // Governance audit service: the sole writer of #__mcpserver_request_log,
         // persisting one row per MCP request, attributed to the authenticated
-        // principal when one is available (null attribution in legacy
+        // principal when one is available (null attribution in
         // shared-token mode). Params are injected so it honours metrics_enabled
         // and metrics_retention_days, which it inherited from MetricsService.
         $container->share(GovernanceAuditService::class, function () {
@@ -301,7 +319,7 @@ return new class implements ServiceProviderInterface {
             );
         });
 
-        // REST client (shared/legacy token)
+        // REST client using the shared Joomla API token
         $container->share(RestClient::class, function (Container $container) {
             return $container->get(RestClientFactory::class)->createShared();
         });

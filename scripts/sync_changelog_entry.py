@@ -9,6 +9,10 @@ Usage:
     sync_changelog_entry.py <changelog.xml> <version> [changelog.md]
 
 Idempotent: re-running with the same arguments leaves the file unchanged.
+
+Each version gets one block per extension in TARGETS. From 1.12.0 the release is
+the pkg_mcpserver package; the component block is kept too, because sites
+upgrading from a component-only install are offered the update on the component.
 """
 
 import re
@@ -16,8 +20,8 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-ELEMENT = "com_mcpserver"
-COMPONENT_TYPE = "component"
+# (element, type) pairs, in the order their blocks appear in the feed.
+TARGETS = (("pkg_mcpserver", "package"), ("com_mcpserver", "component"))
 CATEGORY_ORDER = ("addition", "fix", "change", "note")
 
 
@@ -64,11 +68,11 @@ def group_items(items: list[str]) -> dict[str, list[str]]:
     return grouped
 
 
-def build_changelog_block(version: str, grouped: dict[str, list[str]]) -> str:
+def build_changelog_block(version: str, grouped: dict[str, list[str]], element: str, kind: str) -> str:
     lines = [
         "    <changelog>",
-        f"        <element>{ELEMENT}</element>",
-        f"        <type>{COMPONENT_TYPE}</type>",
+        f"        <element>{element}</element>",
+        f"        <type>{kind}</type>",
         f"        <version>{version}</version>",
     ]
     for category in CATEGORY_ORDER:
@@ -83,13 +87,14 @@ def build_changelog_block(version: str, grouped: dict[str, list[str]]) -> str:
     return "\n".join(lines)
 
 
-def find_changelog_block(xml: str, version: str) -> tuple[int, int] | None:
+def find_changelog_block(xml: str, version: str, element: str) -> tuple[int, int] | None:
     for match in re.finditer(
         r"\n    <changelog>.*?</changelog>",
         xml,
         flags=re.S,
     ):
-        if f"<version>{version}</version>" in match.group(0):
+        block = match.group(0)
+        if f"<version>{version}</version>" in block and f"<element>{element}</element>" in block:
             return match.span()
     return None
 
@@ -115,26 +120,28 @@ def main() -> None:
         sys.exit(f"No changelog bullets found for version {version} in {markdown_path}")
 
     grouped = group_items(items)
-    new_block = build_changelog_block(version, grouped)
-    replacement = "\n" + new_block
-
     xml = changelog_path.read_text(encoding="utf-8")
-    span = find_changelog_block(xml, version)
+    original = xml
 
-    if span is None:
-        # A function replacement, because the block is changelog prose: a string
-        # template would read backslashes in it (e.g. \RuntimeException) as escapes.
-        xml = re.sub(
-            r"(<changelogs>\n)",
-            lambda match: match.group(1) + new_block + "\n",
-            xml,
-            count=1,
-        )
-    else:
-        existing_block = xml[span[0]:span[1]]
-        if existing_block == replacement:
-            return
-        xml = xml[:span[0]] + replacement + xml[span[1]:]
+    # Reversed, because each new block is prepended: TARGETS order is feed order.
+    for element, kind in reversed(TARGETS):
+        new_block = build_changelog_block(version, grouped, element, kind)
+        span = find_changelog_block(xml, version, element)
+
+        if span is None:
+            # A function replacement, because the block is changelog prose: a string
+            # template would read backslashes in it (e.g. \RuntimeException) as escapes.
+            xml = re.sub(
+                r"(<changelogs>\n)",
+                lambda match, block=new_block: match.group(1) + block + "\n",
+                xml,
+                count=1,
+            )
+        else:
+            xml = xml[:span[0]] + "\n" + new_block + xml[span[1]:]
+
+    if xml == original:
+        return
 
     changelog_path.write_text(xml, encoding="utf-8")
 

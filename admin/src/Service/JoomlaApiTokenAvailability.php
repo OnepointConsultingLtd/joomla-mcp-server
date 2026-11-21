@@ -58,34 +58,49 @@ final class JoomlaApiTokenAvailability
         }
 
         try {
-            $plugin = $this->pluginState();
-
-            if (!$plugin['enabled']) {
-                return [
-                    'can_create' => false,
-                    'plugin_enabled' => false,
-                    'group_names' => $this->groupNames($this->userGroups($userId)),
-                    'extension_id' => $plugin['extension_id'],
-                ];
-            }
-
-            $userGroups = $this->userGroups($userId);
-
-            // Empty allowedUserGroups means every group is permitted.
-            $canCreate = $plugin['groups'] === []
-                || array_intersect($userGroups, $plugin['groups']) !== [];
-
-            return [
-                'can_create' => $canCreate,
-                'plugin_enabled' => true,
-                'group_names' => $canCreate ? [] : $this->groupNames($userGroups),
-                'extension_id' => $plugin['extension_id'],
-            ];
+            return $this->assess($userId);
         } catch (\Throwable) {
             // Diagnostics must never block the approval queue. Assume it is
             // fine; the claim itself still validates for real.
             return $unknown;
         }
+    }
+
+    /**
+     * The same answer as forUser(), but a failed lookup throws instead of
+     * assuming the best. Use this before acting on the answer, such as writing
+     * a token seed, where guessing "allowed" would widen Joomla's policy.
+     *
+     * @return array{can_create:bool, plugin_enabled:bool, group_names:list<string>, extension_id:?int}
+     */
+    public function assess(int $userId): array
+    {
+        $plugin = $this->pluginState();
+
+        if (!$plugin['enabled']) {
+            return [
+                'can_create' => false,
+                'plugin_enabled' => false,
+                'group_names' => $this->groupNames($this->userGroups($userId)),
+                'extension_id' => $plugin['extension_id'],
+            ];
+        }
+
+        if ($userId <= 0) {
+            return ['can_create' => false, 'plugin_enabled' => true, 'group_names' => [], 'extension_id' => $plugin['extension_id']];
+        }
+
+        $userGroups = $this->userGroups($userId);
+
+        // Empty allowedUserGroups means every group is permitted.
+        $canCreate = $plugin['groups'] === [] || array_intersect($userGroups, $plugin['groups']) !== [];
+
+        return [
+            'can_create' => $canCreate,
+            'plugin_enabled' => true,
+            'group_names' => $canCreate ? [] : $this->groupNames($userGroups),
+            'extension_id' => $plugin['extension_id'],
+        ];
     }
 
     /** @return array{enabled:bool,groups:list<int>,extension_id:?int} */

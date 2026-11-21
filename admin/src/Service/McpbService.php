@@ -110,7 +110,7 @@ class McpbService
      */
     public function endpointUrl(): string
     {
-        return $this->baseUrl() . '/index.php?option=com_mcpserver&task=rpc.handle';
+        return ComponentTaskUrl::mcpEndpoint($this->baseUrl());
     }
 
     /**

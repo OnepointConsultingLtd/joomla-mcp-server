@@ -89,16 +89,26 @@ final class CredentialRequestUiWorkflowTest extends TestCase
         $this->assertSame(1, substr_count($source, "\$credential['owner_name']"));
     }
 
-    public function testClaimFieldSuppressesPasswordManagerAutofill(): void
+    public function testClaimingNeverAsksTheOwnerForAJoomlaApiToken(): void
     {
-        $source = $this->source('admin/tmpl/credentials/default.php');
+        // The server works out the owner's own Joomla API token at claim, so
+        // no form may collect one and the claim action may not read one.
+        $this->assertStringNotContainsString('name="api_token"', $this->source('admin/tmpl/credentials/default.php'));
+        $this->assertStringNotContainsString("'api_token'", $this->source('admin/src/Controller/CredentialsController.php'));
+    }
 
-        // Browsers ignore autocomplete="off" on password inputs, so the saved
-        // admin login gets offered as the Joomla API token without this.
-        $this->assertMatchesRegularExpression(
-            '/name="api_token"[^>]*autocomplete="new-password"/',
-            $source
-        );
+    public function testConsentPageClaimsApprovedRequestsWithoutShowingABearerToken(): void
+    {
+        $template = $this->source('site/tmpl/authorize/default.php');
+        $controller = $this->source('admin/src/Controller/OauthController.php');
+
+        // One choice, either an existing credential or an approved request.
+        $this->assertStringContainsString("'credential:' . (int) \$credential['id']", $template);
+        $this->assertStringContainsString("'request:' . \$approved['id']", $template);
+        $this->assertSame(2, substr_count($template, 'name="binding"'));
+        $this->assertStringNotContainsString('bearer_token', $template);
+        $this->assertStringContainsString('approveByClaiming(', $controller);
+        $this->assertStringNotContainsString('bearer_token', $controller);
     }
 
     public function testTemplateProvidesRequestClaimAndIndependentAdminDecisionFormsInOrder(): void
@@ -109,7 +119,6 @@ final class CredentialRequestUiWorkflowTest extends TestCase
         foreach (['task=credentials.requestAccess', 'task=credentials.claim', 'task=credentials.approve', 'task=credentials.reject'] as $task) {
             $this->assertStringContainsString($task, $source);
         }
-        $this->assertSame(1, substr_count($source, 'name="api_token"'), 'The Joomla API token may be submitted only by the approved-request claim form.');
         $this->assertStringContainsString('name="expires_days"', $source);
         $this->assertStringContainsString('COM_MCPSERVER_CREDENTIALS_REQUEST_TITLE', $source);
         $this->assertStringContainsString('COM_MCPSERVER_CREDENTIALS_REQUESTS_TITLE', $source);

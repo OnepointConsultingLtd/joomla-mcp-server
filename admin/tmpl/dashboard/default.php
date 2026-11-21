@@ -384,7 +384,7 @@ $cards = [
                                     <td><span class="badge <?php echo $statusBadge((string) ($row['status'] ?? '')); ?>"><?php echo htmlspecialchars((string) ($row['status'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></td>
                                     <td>
                                         <?php if (($row['user_id'] ?? null) === null) : ?>
-                                            <?php // No principal was resolved: legacy shared-token mode, or a failure before authentication. Not the same as an unknown name. ?>
+                                            <?php // No principal was resolved: shared-token mode, or a failure before authentication. Not the same as an unknown name. ?>
                                             <span class="text-muted" title="<?php echo htmlspecialchars(Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_UNATTRIBUTED_DESC'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo Text::_('COM_MCPSERVER_GOVERNANCE_AUDIT_USER_UNATTRIBUTED'); ?></span>
                                         <?php else : ?>
                                             <?php echo htmlspecialchars($auditUserLabel($row), ENT_QUOTES, 'UTF-8'); ?>

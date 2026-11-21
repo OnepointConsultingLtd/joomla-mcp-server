@@ -33,6 +33,17 @@
             <option value="0">JNO</option>
             <option value="1">JYES</option>
         </field>
+        <field name="oauth_enabled" type="radio" label="COM_MCPSERVER_CONFIG_OAUTH_ENABLED" description="COM_MCPSERVER_CONFIG_OAUTH_ENABLED_DESC" default="0" class="btn-group" showon="governed_mode:1">
+            <option value="0">JNO</option>
+            <option value="1">JYES</option>
+        </field>
+        <field name="oauth_allow_registration" type="radio" label="COM_MCPSERVER_CONFIG_OAUTH_ALLOW_REGISTRATION" description="COM_MCPSERVER_CONFIG_OAUTH_ALLOW_REGISTRATION_DESC" default="1" class="btn-group" showon="governed_mode:1[AND]oauth_enabled:1">
+            <option value="0">JNO</option>
+            <option value="1">JYES</option>
+        </field>
+        <field name="oauth_allowed_redirect_hosts" type="textarea" label="COM_MCPSERVER_CONFIG_OAUTH_ALLOWED_REDIRECT_HOSTS" description="COM_MCPSERVER_CONFIG_OAUTH_ALLOWED_REDIRECT_HOSTS_DESC" rows="3" showon="governed_mode:1[AND]oauth_enabled:1" />
+        <field name="oauth_access_token_ttl" type="number" label="COM_MCPSERVER_CONFIG_OAUTH_ACCESS_TOKEN_TTL" description="COM_MCPSERVER_CONFIG_OAUTH_ACCESS_TOKEN_TTL_DESC" default="3600" min="300" max="86400" step="1" showon="governed_mode:1[AND]oauth_enabled:1" />
+        <field name="oauth_refresh_token_ttl_days" type="number" label="COM_MCPSERVER_CONFIG_OAUTH_REFRESH_TOKEN_TTL_DAYS" description="COM_MCPSERVER_CONFIG_OAUTH_REFRESH_TOKEN_TTL_DAYS_DESC" default="30" min="1" max="365" step="1" showon="governed_mode:1[AND]oauth_enabled:1" />
         <field name="credential_salt" type="hidden" default="" />
         <field name="resources_enabled" type="radio" label="COM_MCPSERVER_CONFIG_RESOURCES_ENABLED" description="COM_MCPSERVER_CONFIG_RESOURCES_ENABLED_DESC" default="1" class="btn-group">
             <option value="0">JNO</option>
@@ -49,5 +60,8 @@
             <option value="1">JYES</option>
         </field>
         <field name="metrics_retention_days" type="number" label="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS" description="COM_MCPSERVER_CONFIG_METRICS_RETENTION_DAYS_DESC" default="360" min="1" max="3650" step="1" />
+    </fieldset>
+    <fieldset name="permissions" label="JCONFIG_PERMISSIONS_LABEL" description="JCONFIG_PERMISSIONS_DESC">
+        <field name="rules" type="rules" label="JCONFIG_PERMISSIONS_LABEL" component="com_mcpserver" section="component" filter="rules" validate="rules" />
     </fieldset>
 </config>

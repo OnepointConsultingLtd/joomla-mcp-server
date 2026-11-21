@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The release package: the component plus the system plugin that serves the
+    OAuth URLs a component cannot (/.well-known/...). build.sh syncs the
+    version here and in the plugin's manifest from mcpserver.xml, the single
+    source of truth.
+-->
+<extension type="package" method="upgrade">
+    <name>MCP Server for Joomla</name>
+    <packagename>mcpserver</packagename>
+    <author>Onepoint Consulting Ltd</author>
+    <authorUrl>https://github.com/OnepointConsultingLtd/joomla-mcp-server</authorUrl>
+    <copyright>Copyright (C) 2026 Onepoint Consulting Ltd</copyright>
+    <license>GPL-2.0-or-later</license>
+    <creationDate>2026-11-15</creationDate>
+    <version>1.12.0</version>
+    <description>Model Context Protocol server for Joomla: the MCP Server component and its System - MCP Server plugin.</description>
+    <packager>Onepoint Consulting Ltd</packager>
+    <packagerurl>https://www.onepointltd.com</packagerurl>
+    <blockChildUninstall>true</blockChildUninstall>
+    <scriptfile>script.pkg.php</scriptfile>
+    <files folder="packages">
+        <file type="component" id="com_mcpserver">com_mcpserver.zip</file>
+        <file type="plugin" id="mcpserver" group="system">plg_system_mcpserver.zip</file>
+    </files>
+    <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
+    <updateservers>
+        <server type="extension" priority="1" name="MCP Server for Joomla">https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/update.xml</server>
+    </updateservers>
+</extension>

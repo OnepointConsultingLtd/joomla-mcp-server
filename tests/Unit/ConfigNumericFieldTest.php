@@ -39,6 +39,8 @@ final class ConfigNumericFieldTest extends TestCase
         'rate_limit_requests' => ['min' => '1', 'max' => '10000'],
         'rate_limit_window' => ['min' => '1', 'max' => '86400'],
         'metrics_retention_days' => ['min' => '1', 'max' => '3650'],
+        'oauth_access_token_ttl' => ['min' => '300', 'max' => '86400'],
+        'oauth_refresh_token_ttl_days' => ['min' => '1', 'max' => '365'],
     ];
 
     /**

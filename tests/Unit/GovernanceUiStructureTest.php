@@ -32,9 +32,9 @@ use PHPUnit\Framework\TestCase;
      * fingerprint), rendered before credential requests; setup() redirects back
  * to credentials. The Dashboard's Recent Requests section is the single
  * request-log table: it merges governed audit filters/columns (User ID,
- * credential selector, target) for `mcpserver.credential.audit`/`core.manage`
- * holders, and otherwise shows plain MetricsService rows with no governed
- * details leaked. Audit retention pruning renders inside that same section,
+ * credential selector, target) for users granted
+ * `mcpserver.credential.audit`/`core.manage`, and otherwise shows plain
+ * MetricsService rows with no governed details leaked. Audit retention pruning renders inside that same section,
  * gated to `core.admin`, and prune() redirects back to the dashboard.
  */
 class GovernanceUiStructureTest extends TestCase

@@ -37,7 +37,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\ToolRegistry;
  * aggregate.
  *
  * The Recent Requests section is the single request-log table on this
- * page: holders of `mcpserver.credential.audit` or `core.manage` see the
+ * page: users granted `mcpserver.credential.audit` or `core.manage` see the
  * governed audit rows (with filters and attributable columns such as user
  * id, credential selector, and target/request correlation); everyone else
  * sees MetricsService's plain recent-request rows, with no governed
@@ -104,7 +104,7 @@ class HtmlView extends BaseHtmlView
      * Joomla user id every request-log read on this page is restricted to,
      * or null for the unrestricted Super User view.
      *
-     * Requests recorded without attribution (legacy shared-token mode, or
+     * Requests recorded without attribution (shared-token mode, or
      * authentication failures that never resolved a principal) carry a null
      * `user_id` and therefore belong to nobody: they are visible to Super
      * Users only. The template says so rather than letting a restricted
@@ -207,7 +207,7 @@ class HtmlView extends BaseHtmlView
 
     /**
      * Populate the merged Recent Requests table with governed audit rows
-     * for audit-capable holders, from the request's GET parameters.
+     * for users who may read the audit trail, from the request's GET parameters.
      * Filters are optional; an empty filter value is treated as "not
      * applied" rather than passed through. Whatever the filters say, the
      * query is still confined to $scopeUserId.

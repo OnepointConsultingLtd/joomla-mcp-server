@@ -15,19 +15,20 @@ defined('_JEXEC') or die;
 use Joomla\CMS\Factory;
 use Joomla\Component\Mcpserver\Administrator\Service\AuthService;
 use Joomla\Component\Mcpserver\Administrator\Service\JsonRpc;
+use Joomla\Input\Input;
 use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Coverage for the legacy shared-token path and the IP allow-list.
+ * Coverage for the shared-token mode path and the IP allow-list.
  *
- * Both were restructured when governed mode landed — authenticate() was split
- * into resolve()/doResolve()/authenticateLegacy() and the allow-list check moved
- * up into doResolve() so it now applies to governed mode too — but neither had
- * any test. Deleting the hash_equals() comparison or the allow-list block left
+ * Both were restructured when governed mode landed — authenticate() was
+ * split into resolve()/doResolve()/authenticateSharedToken() and the
+ * allow-list check moved up into doResolve() so it now applies to governed
+ * mode too — but neither had any test. Deleting the hash_equals() comparison or the allow-list block left
  * the whole suite green.
  */
-final class LegacyAuthServiceTest extends TestCase
+final class SharedTokenAuthServiceTest extends TestCase
 {
     /**
      * Install a fake application whose $input->server returns the given values.
@@ -43,21 +44,11 @@ final class LegacyAuthServiceTest extends TestCase
             public function __construct(array $server)
             {
                 $this->input = new class ($server) {
-                    public object $server;
+                    public Input $server;
 
                     public function __construct(array $values)
                     {
-                        $this->server = new class ($values) {
-                            /** @param array<string,string> $values */
-                            public function __construct(private array $values)
-                            {
-                            }
-
-                            public function getString(string $name, string $default = ''): string
-                            {
-                                return $this->values[$name] ?? $default;
-                            }
-                        };
+                        $this->server = new FakeServerInput($values);
                     }
                 };
             }
@@ -86,9 +77,19 @@ final class LegacyAuthServiceTest extends TestCase
         $this->assertNull($auth->authenticate(), 'a matching shared token must authenticate');
     }
 
+    public function testSharedTokenAuthenticatesWithALowerCaseScheme(): void
+    {
+        $auth = $this->service(
+            ['governed_mode' => false, 'require_auth' => true, 'mcp_bearer_token' => 'correct-token'],
+            ['HTTP_AUTHORIZATION' => 'bearer correct-token']
+        );
+
+        $this->assertNull($auth->authenticate(), 'the Bearer scheme is case-insensitive (RFC 7235)');
+    }
+
     /**
      * Without this, deleting the hash_equals() comparison lets any bearer token
-     * authenticate in legacy mode and no test notices.
+     * authenticate in shared-token mode and no test notices.
      */
     public function testWrongSharedTokenIsRejected(): void
     {

@@ -24,6 +24,7 @@ use Joomla\Component\Mcpserver\Administrator\Service\{
     JsonRpc,
     McpCredential,
 };
+use Joomla\Input\Input;
 use Joomla\Registry\Registry;
 use PHPUnit\Framework\TestCase;
 
@@ -65,7 +66,7 @@ final class GovernedAuthServiceTest extends TestCase
     {
         [$authenticator, $token] = $this->makeAuthenticator();
 
-        $service = new GovernedAuthService($authenticator, fn (string $name, string $default): string => $name === 'HTTP_AUTHORIZATION' ? 'Bearer ' . $token : $default);
+        $service = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('Bearer ' . $token));
 
         $result = $service->authenticate();
 
@@ -74,10 +75,19 @@ final class GovernedAuthServiceTest extends TestCase
         $this->assertSame('api-token', $result->apiToken());
     }
 
+    public function testCredentialBearerTokenAuthenticatesWithALowerCaseScheme(): void
+    {
+        [$authenticator, $token] = $this->makeAuthenticator();
+
+        $service = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('bearer ' . $token));
+
+        $this->assertInstanceOf(AuthenticatedPrincipal::class, $service->authenticate());
+    }
+
     public function testMissingAuthorizationHeaderReturnsGenericUnauthorized(): void
     {
         [$authenticator] = $this->makeAuthenticator();
-        $service = new GovernedAuthService($authenticator, fn (string $name, string $default): string => $default);
+        $service = new GovernedAuthService($authenticator, new FakeServerInput());
 
         $result = $service->authenticate();
 
@@ -93,7 +103,7 @@ final class GovernedAuthServiceTest extends TestCase
         $authenticator = new GovernedCredentialAuthenticator($store, $cipher);
         $unknownToken = McpCredential::issue()['token'];
 
-        $service = new GovernedAuthService($authenticator, fn (string $name, string $default): string => $name === 'HTTP_AUTHORIZATION' ? 'Bearer ' . $unknownToken : $default);
+        $service = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('Bearer ' . $unknownToken));
 
         $result = $service->authenticate();
 
@@ -105,12 +115,12 @@ final class GovernedAuthServiceTest extends TestCase
     public function testAuthServiceGovernedModeDoesNotUseSharedToken(): void
     {
         [$authenticator, $token, $store] = $this->makeAuthenticator();
-        $governed = new GovernedAuthService($authenticator, fn (string $name, string $default): string => $name === 'HTTP_AUTHORIZATION' ? 'Bearer ' . $token : $default);
+        $governed = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('Bearer ' . $token));
 
         $config = new Registry([
             'governed_mode' => true,
             // A shared token is present but must never be consulted in governed mode.
-            'mcp_bearer_token' => 'legacy-shared-token',
+            'mcp_bearer_token' => 'shared-bearer-token',
             'require_auth' => true,
         ]);
 
@@ -132,7 +142,7 @@ final class GovernedAuthServiceTest extends TestCase
     public function testAuthServiceMemoizesResolutionAcrossRepeatedCallsInEitherOrder(): void
     {
         [$authenticator, $token, $store] = $this->makeAuthenticator();
-        $governed = new GovernedAuthService($authenticator, fn (string $name, string $default): string => $name === 'HTTP_AUTHORIZATION' ? 'Bearer ' . $token : $default);
+        $governed = new GovernedAuthService($authenticator, FakeServerInput::withAuthorization('Bearer ' . $token));
 
         $config = new Registry(['governed_mode' => true]);
         $authService = new AuthService($config, $governed);
@@ -156,14 +166,8 @@ final class GovernedAuthServiceTest extends TestCase
         $authenticator = new GovernedCredentialAuthenticator($store, $cipher);
         $unknownToken = McpCredential::issue()['token'];
 
-        $callCount = 0;
-        $governed = new GovernedAuthService($authenticator, function (string $name, string $default) use (&$callCount, $unknownToken): string {
-            if ($name === 'HTTP_AUTHORIZATION') {
-                ++$callCount;
-            }
-
-            return $name === 'HTTP_AUTHORIZATION' ? 'Bearer ' . $unknownToken : $default;
-        });
+        $server = FakeServerInput::withAuthorization('Bearer ' . $unknownToken);
+        $governed = new GovernedAuthService($authenticator, $server);
 
         $config = new Registry(['governed_mode' => true]);
         $authService = new AuthService($config, $governed);
@@ -172,7 +176,7 @@ final class GovernedAuthServiceTest extends TestCase
         $second = $authService->authenticate();
 
         $this->assertSame($first, $second, 'a repeated authenticate() call must return the same memoized failure, not re-run verification');
-        $this->assertSame(1, $callCount, 'the Authorization header must only be read once per request');
+        $this->assertSame(1, $server->reads['HTTP_AUTHORIZATION'] ?? 0, 'the Authorization header must only be read once per request');
     }
 
     public function testAuthServiceGovernedModeWithoutHelperIsForbidden(): void
@@ -186,7 +190,7 @@ final class GovernedAuthServiceTest extends TestCase
         $this->assertSame(JsonRpc::FORBIDDEN, $result['code']);
     }
 
-    public function testLegacyModeUnaffectedByGovernedHelperAbsence(): void
+    public function testSharedTokenModeUnaffectedByGovernedHelperAbsence(): void
     {
         Factory::$application = new class {
             public object $input;
@@ -194,16 +198,11 @@ final class GovernedAuthServiceTest extends TestCase
             public function __construct()
             {
                 $this->input = new class {
-                    public object $server;
+                    public Input $server;
 
                     public function __construct()
                     {
-                        $this->server = new class {
-                            public function getString(string $name, string $default = ''): string
-                            {
-                                return $default;
-                            }
-                        };
+                        $this->server = new FakeServerInput();
                     }
                 };
             }

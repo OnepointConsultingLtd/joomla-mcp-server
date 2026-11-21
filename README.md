@@ -2,7 +2,7 @@
 
 A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server over HTTP JSON-RPC. It lets MCP clients such as Claude Desktop and Cursor work with Joomla content through the site's own Joomla Web Services API.
 
-**Version:** 1.11.1 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
+**Version:** 1.12.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
 
 ## Features
 
@@ -11,6 +11,7 @@ A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](http
 - Administrator dashboard with request summary (totals, error rate and auth failures), a requests-per-day chart, top tools and methods, and a requests log — restricted to the viewer's own requests unless they are a Super User
 - One-click Claude Desktop extension (`.mcpb`), generated on demand from the administrator or attached to every release
 - Security with bearer token authentication, optional IP allow-listing and `Origin` validation
+- OAuth 2.1 sign-in for MCP clients that support it, such as ChatGPT and Claude on the web, with each connection bound to a Governed Mode credential (see [OAuth Sign-in](#oauth-sign-in))
 - Configurable fixed-window rate limiting
 - Response caching through Joomla's cache layer
 - JSON Schema validation for MCP tool inputs
@@ -300,7 +301,9 @@ Clients that support completion get suggestions while filling in prompt argument
 
 ## Installation
 
-Download the latest `com_mcpserver-<version>.zip` package from the GitHub releases page, then install it in Joomla Administrator via **System → Install → Extensions**.
+Download the latest `pkg_mcpserver-<version>.zip` package from the GitHub releases page, then install it in Joomla Administrator via **System → Install → Extensions**. It installs the component and the **System - MCP Server** plugin (which serves the [OAuth Sign-in](#oauth-sign-in) URLs), and Joomla lists it under **Extensions: Manage** as the *MCP Server for Joomla* package.
+
+**Upgrading from 1.11.x or earlier**, where the component was installed on its own: Joomla offers the 1.12.0 update on the component as usual. It installs the package over the existing component, keeping all settings and data, and later updates come through the package. To uninstall, uninstall the package; Joomla will not remove the component or plugin separately.
 
 For a local development build:
 
@@ -308,7 +311,7 @@ For a local development build:
 ./build.sh
 ```
 
-The build creates `com_mcpserver-<version>.zip` at the repository root. The version is read from `mcpserver.xml`.
+The build creates `pkg_mcpserver-<version>.zip` at the repository root, containing `com_mcpserver.zip` and `plg_system_mcpserver.zip`. The version is read from `mcpserver.xml` and written into the package and plugin manifests.
 
 ## Configuration
 
@@ -318,7 +321,7 @@ Key settings:
 
 - `Server Name`: identifier returned in MCP server information.
 - `Base URL`: base URL of the Joomla site. Leave empty to use the current site.
-- `API Token`: Joomla Web Services API token used for outbound REST calls.
+- `Shared Joomla API Token`: Joomla Web Services API token used for outbound REST calls in shared-token mode.
 - `Verify SSL`: verifies SSL certificates for outbound requests.
 - `Resolve Host To IP`: optional. Pins the Base URL hostname to a specific IP (e.g. `127.0.0.1`) for the component's outbound REST calls only. Use when the server cannot reach its own public hostname (NAT hairpinning); the Host header and TLS validation still use the real hostname, so `Verify SSL` can stay on.
 - `Cache TTL`: response cache lifetime in seconds.
@@ -335,7 +338,7 @@ Key settings:
 
 ### Configuring the API Token
 
-The `API Token` setting holds a Joomla Web Services API token. The component uses it to make outbound REST calls to your site's own Joomla Web Services API, which is how most MCP tools read and write content. Without a valid token, those tools will fail.
+The `Shared Joomla API Token` setting holds a Joomla Web Services API token. The component uses it to make outbound REST calls to your site's own Joomla Web Services API, which is how most MCP tools read and write content. Without a valid token, those tools will fail.
 
 1. **Enable the Web Services API.** In the Joomla administrator, go to **System → Global Configuration → Server** and ensure the Web Services components are available. The relevant plugins live under **System → Plugins**; enable **Web Services - Content** (and any other `Web Services -` plugins for the data you want to access). The API plugin **System - Joomla API Authentication** must also be enabled — it is by default.
 
@@ -343,7 +346,7 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
    - Go to **Users → Manage**, edit the chosen user, and open the **Joomla API Token** tab.
    - Set **Token Enabled** to *Yes*, click **Save**, then copy the generated token. (If the tab is missing, enable the **User - Joomla API Token** plugin under **System → Plugins**.)
 
-3. **Paste the token into the component options.** Back in **Components → MCP Server**, click **Options** in the toolbar, paste the value into **API Token** and click **Save**.
+3. **Paste the token into the component options.** Back in **Components → MCP Server**, click **Options** in the toolbar, paste the value into **Shared Joomla API Token** and click **Save**.
 
 4. **Verify the API is reachable.** The component calls your site's own API under `/api/`, so the web server must route that path to Joomla's API application. On Apache this works out of the box — Joomla's core `.htaccess` rewrites `/api/` requests to `api/index.php`. On nginx there is no equivalent by default, so every tool fails while `health.ping` still reports `ok` (that endpoint only checks the component itself, not the outbound API layer). Check with:
 
@@ -372,19 +375,18 @@ The `API Token` setting holds a Joomla Web Services API token. The component use
 
 ## Governed Mode (per-client credentials)
 
-By default the component authenticates every MCP client with the single shared **MCP Bearer Token** and makes outbound Joomla API calls with the **Legacy Shared API Token** in Basic Settings. **Governed Mode** ignores that Basic Settings token and replaces it with individually issued, revocable credentials: each MCP client authenticates with its own bearer token, and every request is made using the Joomla API token encrypted inside that client's credential. Successful mutating tool calls made under a governed credential are additionally attributed to the credential's Joomla user in both the component's own request log and, when available, Joomla's core **Action Logs**.
+By default the component authenticates every MCP client with the single shared **MCP Bearer Token** and makes outbound Joomla API calls with the **Shared Joomla API Token** in Basic Settings. **Governed Mode** ignores that Basic Settings token and replaces it with individually issued, revocable credentials: each MCP client authenticates with its own bearer token, and every request is made using the Joomla API token encrypted inside that client's credential. Successful mutating tool calls made under a governed credential are additionally attributed to the credential's Joomla user in both the component's own request log and, when available, Joomla's core **Action Logs**.
 
 ### Prerequisite: API tokens for every user who needs a credential
 
-Claiming a governed credential requires the user's **own** Joomla Web Services API token, so each of them must be able to create one. Joomla's **User - Joomla API Token** plugin controls this, and its *Allowed User Groups* setting defaults to **Super Users only** — so on a stock site nobody else has an **API Tokens** tab on their account, the claim field cannot be filled in, and the claim fails.
+A governed credential runs tool calls with the user's **own** Joomla Web Services API token, so each of them must be allowed to hold one. Joomla's **User - Joomla API Token** plugin controls this, and its *Allowed User Groups* setting defaults to **Super Users only** — so on a stock site nobody else can have an API token, and their claim fails.
 
 Before cutover, for every group that will hold a credential:
 
 1. Go to **System → Plugins → User - Joomla API Token** and make sure it is enabled.
 2. Add those user groups to **Allowed User Groups**, and save.
-3. Each user opens their account (**User Menu → Edit Account**, or **Users → Manage → [their account]**), goes to the **API Tokens** tab, sets **Token Enabled** to *Yes*, and copies the token shown.
 
-That token is what they paste when claiming. The component verifies it belongs to them, stores it encrypted, and never displays it again.
+Users don't need to do anything with their tokens. When a user claims, the component works out their current token from their account, stores it encrypted, and never displays it. A user who has never had a token gets one created at claim, exactly as Joomla would create it when they save their profile; it then appears on the **API Tokens** tab of their account like any other. A user who has switched their token off must switch it back on before claiming: the component never re-enables it for them.
 
 You do not have to work this out in advance: if a requester's group has no route to an API token, the **Pending credential requests** queue says so on that request, names the groups to add, and distinguishes a group restriction from the plugin being disabled outright. A request flagged this way can be approved, but never claimed, until the plugin setting is changed.
 
@@ -408,23 +410,62 @@ Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Sec
 
 > **Plan for downtime.** Enabling Governed Mode stops the shared `MCP Bearer Token` from being accepted immediately, but credentials can only be requested after it is enabled. Every MCP client is therefore refused from the moment you switch it on until its user has claimed a credential. Do the cutover in a maintenance window, and have each user ready to claim.
 
-1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the shared `API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
+1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the `Shared Joomla API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
 2. Open **Manage Credentials** and check the Setup panel above: the credential salt is generated automatically on install/update, so this is normally a confirmation rather than an action.
-3. Each eligible user opens **Manage Credentials** and requests access with the client name. A different Super User reviews the pending request, approves it, and chooses that request's expiry. A Super User cannot approve or reject their own request.
-4. The request owner then opens their approved request, enters their own current Joomla API token, and claims the credential. The component validates the token's ownership only at this step. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
+3. Each eligible user opens **Manage Credentials** and requests access with the client name. A Super User reviews the pending request, approves it, and chooses that request's expiry. Super Users can approve or reject their own requests, so a site with a single administrator can issue itself a credential.
+4. The request owner then opens their approved request and claims the credential. The component binds the owner's own current Joomla API token at this step; the owner does not enter it. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
 5. Once every client has claimed and configured its credential, service is restored: each client now authenticates and acts as its own issued credential and its own Joomla user.
 
 To roll back, switch Governed Mode off: the shared bearer token is accepted again immediately, issued credentials stop working, and **Manage Credentials** disappears from the menu. Nothing is deleted, so switching it back on restores the previously issued credentials.
 
 ### Rollback
 
-Disabling **Governed Mode** in **Options → Security Settings** is the rollback: it does not delete the credential salt, any issued credential, or the audit trail — it only stops governed authentication being used, so requests fall back to the shared `MCP Bearer Token` and shared `API Token` immediately. Re-enabling later resumes governed authentication with the same salt and the same still-active credentials, without needing to re-run Setup or reissue credentials (unless they have since expired or been revoked).
+Disabling **Governed Mode** in **Options → Security Settings** is the rollback: it does not delete the credential salt, any issued credential, or the audit trail — it only stops governed authentication being used, so requests fall back to the shared `MCP Bearer Token` and `Shared Joomla API Token` immediately. Re-enabling later resumes governed authentication with the same salt and the same still-active credentials, without needing to re-run Setup or reissue credentials (unless they have since expired or been revoked).
 
 ### Recovery
 
 - **Lost or revoked a credential:** submit and claim a new request from **Manage Credentials** for the same user; the old credential's bearer token cannot be recovered (it is never stored), only revoked.
 - **Restoring the site from a database backup:** because encrypted credential tokens are keyed on the credential salt (`#__extensions.params.credential_salt` for `com_mcpserver`) together with the Joomla application secret, restore both from the same backup as the `#__mcpserver_credential` table. Compare the recovery key fingerprint shown on **Manage Credentials** before and after the restore to confirm the salt was preserved; a changed fingerprint means every existing credential must be reissued.
 - **Joomla application secret rotated independently of a restore:** this also invalidates every existing credential's stored ciphertext, since the encryption key is derived from both the secret and the salt. Reissue credentials for every affected client after rotating the secret.
+
+## OAuth Sign-in
+
+MCP clients that support OAuth, such as ChatGPT and Claude on the web, can connect by signing in to the site instead of being given a bearer token. You give the client only the endpoint URL. The client registers itself, sends the user to the site to sign in and approve it, and then calls the server with short-lived access tokens.
+
+OAuth sign-in builds on [Governed Mode](#governed-mode-per-client-credentials) rather than replacing it. On the approval page, the user chooses one of their own active MCP credentials, or one of their approved credential requests: choosing a request claims it there and then, so the user never handles a bearer token. The client then acts as that credential, with its Joomla user's permissions. Approval, expiry, revocation, the audit trail and Action Log attribution apply as they do for a credential bearer token. Revoking the credential, or switching OAuth off, ends the client's access on its next request.
+
+### Requirements
+
+- **Governed Mode** is on, and each user who will connect has a credential or an approved credential request. An approved request can be claimed on the approval page itself.
+- The **System - MCP Server** plugin is enabled. It is part of the MCP Server for Joomla package, is enabled when the package is first installed, and does nothing while OAuth Sign-in is off. Clients look up OAuth at `/.well-known/oauth-authorization-server` on the site root, a URL a component cannot serve, so the plugin answers it.
+- **URL rewriting** sends unknown paths to Joomla, so that `/.well-known/...` reaches the plugin. Joomla's standard `.htaccess` on Apache and its documented `try_files` rule on nginx both do this. Without URL rewriting, the endpoints fall back to `index.php/mcp-oauth/...`, but the `/.well-known/` metadata still needs a web-server rule.
+- The site is reachable over **HTTPS** at its own domain root. On a site installed in a subdirectory (`https://example.com/joomla/`), clients look for `/.well-known/oauth-authorization-server/joomla` on the domain root, outside Joomla. Add a web-server rewrite from there to `/joomla/.well-known/oauth-authorization-server`.
+
+### Setup
+
+1. In **Options → Security Settings**, set **OAuth Sign-in** to *Yes* (it appears once Governed Mode is on).
+2. Set **Allowed Redirect Hosts** (recommended), for example `chatgpt.com` and `claude.ai`, plus `cursor:` or `vscode:` if desktop clients use those app schemes. With this set, clients can only register redirects to what it lists. Loopback redirects (`http://127.0.0.1:<port>`) used by desktop clients are always allowed. Left empty, any https host or app scheme can be registered, and the approval page is the only safeguard.
+3. Check discovery: `curl https://example.com/.well-known/oauth-authorization-server` should return JSON whose `issuer` is your site URL.
+4. In the MCP client, add the server by its endpoint URL, `https://example.com/index.php?option=com_mcpserver&task=rpc.handle`, and choose OAuth (or leave authentication on automatic). The client opens the site's sign-in page. Sign in with your Joomla account, choose a credential and approve.
+
+### How it works
+
+- An unauthenticated request to the MCP endpoint gets HTTP 401 with `WWW-Authenticate: Bearer resource_metadata="..."`, pointing at the Protected Resource Metadata (RFC 9728).
+- The authorisation server supports the authorisation code grant with PKCE (`S256` only), Dynamic Client Registration (RFC 7591), Client ID Metadata Documents (an https `client_id` whose JSON document the site fetches, caches for an hour, and checks like a registration), rotating refresh tokens, token revocation (RFC 7009), resource indicators (RFC 8707) and the `iss` response parameter (RFC 9207). The only scope is `mcp`.
+- The approval page uses Joomla's own login, so two-factor authentication and login plugins apply. Nothing is redirected back to a client before the user has signed in. The page shows the client's name as the client's own unverified claim, together with where it will send the user back to.
+- Client ID Metadata Documents are fetched only over https on port 443, from a host name that resolves to public addresses, with no redirects, a 5-second timeout and a 16 KB limit, so a `client_id` cannot be used to reach the server's internal network. The approval page names the host a document came from, which unlike the client's name is verified.
+- Only client registration is rate-limited (per IP, using the RPC limits). The token endpoint is not, because hosted clients call it for all their users from a few shared addresses.
+- Access tokens last an hour by default (**Access Token Lifetime**). Each refresh issues a new refresh token (**Refresh Token Lifetime**, 30 days by default). If an old refresh token or a used authorisation code is presented again, every token from that approval is revoked.
+- Codes, tokens and client secrets are stored only as SHA-256 hashes, in `#__mcpserver_oauth_*`. Registered clients that never complete a sign-in are removed after 30 days.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/.well-known/oauth-authorization-server` | Authorization Server Metadata (RFC 8414) |
+| `GET` | `/.well-known/oauth-protected-resource` | Protected Resource Metadata (RFC 9728); also at `index.php?option=com_mcpserver&task=oauth.resource` |
+| `GET`, `POST` | `/mcp-oauth/authorize` | Sign-in and approval page (redirects to `task=oauth.authorize`) |
+| `POST` | `/mcp-oauth/token` | Token endpoint |
+| `POST` | `/mcp-oauth/register` | Dynamic Client Registration (when **Allow Client Registration** is on) |
+| `POST` | `/mcp-oauth/revoke` | Token revocation |
 
 ## Endpoints
 
@@ -463,7 +504,7 @@ For every revision:
 - A `tools/call` carrying `_meta.progressToken` receives `notifications/progress` on an event-stream response while it runs: page by page for tools that read many pages (SEO audit, internal-link check, custom module lists) and by stage for `install_extension`. A call that reports no progress still gets an ordinary JSON response. Closing the stream cancels the call at its next progress point — never after a change has been saved — and it is logged with status 499.
 - `completion/complete` is available whenever Enable Prompts or Enable Resources is on.
 
-Not implemented, all optional in the specification: OAuth authorization (clients authenticate with the bearer token or a Governed Mode credential), push change notifications, multi-round-trip input requests (no tool needs input from the client) and the tasks extension. These are planned. The deprecated logging, sampling and roots features will not be added.
+Authorisation is supported through [OAuth Sign-in](#oauth-sign-in), which needs Governed Mode. Not implemented, all optional in the specification: push change notifications, multi-round-trip input requests (no tool needs input from the client) and the tasks extension. These are planned. The deprecated logging, sampling and roots features will not be added.
 
 **Upgrading:** a bridge or `.mcpb` extension from 1.9.0 or earlier does not send the headers `2026-07-28` requires, so a client speaking that revision through it gets `-32020`. The exception is the `server/discover` probe that dual-era clients send first: without the header it is answered as a legacy request (`-32601`), so such a client falls back to `initialize` and keeps working in the older protocol. After upgrading the component, download the extension again (below) or replace your copy of `mcp-http-bridge.js`. Clients that use `initialize` keep working with the old bridge.
 

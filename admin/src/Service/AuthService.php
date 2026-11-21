@@ -50,7 +50,7 @@ class AuthService
      * authenticatePrincipal() then, on a null principal, authenticate() —
      * both must observe the same single authentication attempt rather than
      * re-running governed-credential verification (and its touchLastUsed
-     * side effect) or legacy token comparison a second time per request.
+     * side effect) or the shared bearer token comparison a second time per request.
      *
      * @return AuthenticatedPrincipal|array{error:string,code:int}|null
      */
@@ -89,10 +89,10 @@ class AuthService
             return $this->governedAuthService->authenticate();
         }
 
-        return $this->authenticateLegacy();
+        return $this->authenticateSharedToken();
     }
 
-    private function authenticateLegacy(): ?array
+    private function authenticateSharedToken(): ?array
     {
         $app = Factory::getApplication();
         $input = $app->input;
@@ -111,15 +111,7 @@ class AuthService
                 return ['error' => 'Authentication required but no server token configured', 'code' => JsonRpc::FORBIDDEN];
             }
 
-            $authHeader = $input->server->getString('HTTP_AUTHORIZATION', '');
-            if (empty($authHeader)) {
-                $authHeader = $input->server->getString('REDIRECT_HTTP_AUTHORIZATION', '');
-            }
-
-            $providedToken = '';
-            if (str_starts_with($authHeader, 'Bearer ')) {
-                $providedToken = substr($authHeader, 7);
-            }
+            $providedToken = AuthorizationHeader::bearerTokenFrom($input->server) ?? '';
 
             if (empty($providedToken)) {
                 return ['error' => 'Missing bearer token in Authorization header', 'code' => JsonRpc::UNAUTHORIZED];

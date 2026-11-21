@@ -167,12 +167,7 @@ HTMLHelper::_('bootstrap.tooltip');
                                             <?php if ($request['status'] === 'approved'): ?>
                                                 <form action="index.php?option=com_mcpserver&amp;task=credentials.claim" method="post">
                                                     <input type="hidden" name="id" value="<?php echo htmlspecialchars($request['id'], ENT_QUOTES, 'UTF-8'); ?>">
-                                                    <label class="visually-hidden" for="api_token_<?php echo (int) $request['id']; ?>"><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_API_TOKEN_LABEL'); ?></label>
-                                                    <div class="input-group input-group-sm">
-                                                        <?php // autocomplete="new-password" (not "off", which browsers ignore on password inputs) stops the password manager offering the saved admin login here; the data-*-ignore pairs do the same for 1Password/LastPass/Bitwarden. ?>
-                                                        <input type="password" class="form-control" id="api_token_<?php echo (int) $request['id']; ?>" name="api_token" required autocomplete="new-password" data-1p-ignore data-lpignore="true" data-bwignore placeholder="<?php echo Text::_('COM_MCPSERVER_CREDENTIALS_API_TOKEN_LABEL'); ?>">
-                                                        <button type="submit" class="btn btn-primary"><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_CLAIM_BUTTON'); ?></button>
-                                                    </div>
+                                                    <button type="submit" class="btn btn-primary btn-sm"><?php echo Text::_('COM_MCPSERVER_CREDENTIALS_CLAIM_BUTTON'); ?></button>
                                                     <div class="form-text">
                                                         <?php echo Text::_('COM_MCPSERVER_CREDENTIALS_CLAIM_HELP'); ?>
                                                         <a href="<?php echo htmlspecialchars($this->accountEditUrl, ENT_QUOTES, 'UTF-8'); ?>">

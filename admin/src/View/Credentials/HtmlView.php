@@ -27,7 +27,8 @@ use Joomla\Component\Mcpserver\Administrator\Service\JoomlaApiTokenAvailability;
 
 /**
  * Self-service credential request and lifecycle view. Users request access,
- * then claim an approved request with their own Joomla API token. It never
+ * then claim an approved request, which binds their own Joomla API token
+ * without them handling it. It never
  * renders a stored/previously issued token; only the token returned by the
  * claim action, held in user state for exactly one redirect, is plaintext.
  *

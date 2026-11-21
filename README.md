@@ -379,15 +379,15 @@ By default the component authenticates every MCP client with the single shared *
 
 ### Prerequisite: API tokens for every user who needs a credential
 
-Claiming a governed credential requires the user's **own** Joomla Web Services API token, so each of them must be able to create one. Joomla's **User - Joomla API Token** plugin controls this, and its *Allowed User Groups* setting defaults to **Super Users only** — so on a stock site nobody else has an **API Tokens** tab on their account, the claim field cannot be filled in, and the claim fails.
+A governed credential runs tool calls with the user's **own** Joomla Web Services API token, so each of them must be allowed to hold one. Joomla's **User - Joomla API Token** plugin controls this, and its *Allowed User Groups* setting defaults to **Super Users only** — so on a stock site nobody else can have an API token, and their claim fails.
 
 Before cutover, for every group that will hold a credential:
 
 1. Go to **System → Plugins → User - Joomla API Token** and make sure it is enabled.
 2. Add those user groups to **Allowed User Groups**, and save.
-3. Each user opens their account (**User Menu → Edit Account**, or **Users → Manage → [their account]**), goes to the **API Tokens** tab, sets **Token Enabled** to *Yes*, and copies the token shown.
+3. Each user opens their account (**User Menu → Edit Account**, or **Users → Manage → [their account]**), goes to the **API Tokens** tab, sets **Token Enabled** to *Yes*, and saves.
 
-That token is what they paste when claiming. The component verifies it belongs to them, stores it encrypted, and never displays it again.
+Nobody copies or pastes the token. When the user claims, the component works out their current token from their account, stores it encrypted, and never displays it.
 
 You do not have to work this out in advance: if a requester's group has no route to an API token, the **Pending credential requests** queue says so on that request, names the groups to add, and distinguishes a group restriction from the plugin being disabled outright. A request flagged this way can be approved, but never claimed, until the plugin setting is changed.
 
@@ -414,7 +414,7 @@ Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Sec
 1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the shared `API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
 2. Open **Manage Credentials** and check the Setup panel above: the credential salt is generated automatically on install/update, so this is normally a confirmation rather than an action.
 3. Each eligible user opens **Manage Credentials** and requests access with the client name. A Super User reviews the pending request, approves it, and chooses that request's expiry. Super Users can approve or reject their own requests, so a site with a single administrator can issue itself a credential.
-4. The request owner then opens their approved request, enters their own current Joomla API token, and claims the credential. The component validates the token's ownership only at this step. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
+4. The request owner then opens their approved request and claims the credential. The component binds the owner's own current Joomla API token at this step; the owner does not enter it. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
 5. Once every client has claimed and configured its credential, service is restored: each client now authenticates and acts as its own issued credential and its own Joomla user.
 
 To roll back, switch Governed Mode off: the shared bearer token is accepted again immediately, issued credentials stop working, and **Manage Credentials** disappears from the menu. Nothing is deleted, so switching it back on restores the previously issued credentials.

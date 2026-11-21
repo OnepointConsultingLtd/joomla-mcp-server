@@ -209,6 +209,75 @@ final class JoomlaApiTokenOwnershipValidatorTest extends TestCase
         );
     }
 
+    /**
+     * Known-good tokens for user 42, seed "seed-bytes", secret "site-secret",
+     * in the format plg_user_token displays: base64("algo:userId:hmac").
+     */
+    private const SHA256_TOKEN_42 = 'c2hhMjU2OjQyOjExMjhmZDRjMmMxYzc1NjliYWI2ZTE0MzY2MmE5N2NmYTFlZWU3MGEyNDlmY2EwYjNmMDhhNzFjYTMwZTcwNTQ=';
+    private const SHA512_TOKEN_42 = 'c2hhNTEyOjQyOmQzNzZjNWZiMGZiODEwYmIwYjdhZmY0OTdjYjZiOGE0NGNlYTFlNjZjMTIwZjJkNjA4OTE4ZGE3MGMwODQxODdkN2JjMDM2MTBiNDQ1MWM2MGVlZGUzMWZlMTFiNTg4ZGE0ZjEwYmU3ZWI5OGE3OTY0Y2Y1ZjNiNTdkNjUxOTY4';
+
+    public function testDerivesTheOwnersSha256TokenAsJoomlaIssuesIt(): void
+    {
+        $this->assertSame(
+            ['reason' => JoomlaApiTokenOwnershipValidator::OK, 'token' => self::SHA256_TOKEN_42],
+            $this->validator(base64_encode('seed-bytes'), '1')->deriveToken(42, 'sha256')
+        );
+    }
+
+    public function testDerivesTheOwnersSha512TokenAsJoomlaIssuesIt(): void
+    {
+        $this->assertSame(
+            ['reason' => JoomlaApiTokenOwnershipValidator::OK, 'token' => self::SHA512_TOKEN_42],
+            $this->validator(base64_encode('seed-bytes'), '1')->deriveToken(42, 'sha512')
+        );
+    }
+
+    public function testDerivingReportsWhyNoTokenCanBeWorkedOut(): void
+    {
+        $cases = [
+            'no seed' => [null, '1', self::SECRET, 'sha256', JoomlaApiTokenOwnershipValidator::REASON_NO_SEED],
+            'disabled' => [base64_encode('seed-bytes'), '0', self::SECRET, 'sha256', JoomlaApiTokenOwnershipValidator::REASON_NOT_ENABLED],
+            'empty secret' => [base64_encode('seed-bytes'), '1', '', 'sha256', JoomlaApiTokenOwnershipValidator::REASON_NO_SECRET],
+            'unsupported algorithm' => [base64_encode('seed-bytes'), '1', self::SECRET, 'md5', JoomlaApiTokenOwnershipValidator::REASON_ALGORITHM],
+        ];
+
+        foreach ($cases as $label => [$seed, $enabled, $secret, $algo, $reason]) {
+            $validator = new JoomlaApiTokenOwnershipValidator(
+                new ApiTokenOwnershipDatabase([$seed, $enabled]),
+                static fn (): string => $secret,
+            );
+
+            $this->assertSame(['reason' => $reason, 'token' => null], $validator->deriveToken(42, $algo), $label);
+        }
+    }
+
+    public function testAZeroPaddedUserIdStillMatchesTheSameUser(): void
+    {
+        $token = base64_encode('sha256:042:' . hash_hmac('sha256', 'seed-bytes', self::SECRET));
+
+        $this->assertSame(
+            JoomlaApiTokenOwnershipValidator::OK,
+            $this->validator(base64_encode('seed-bytes'), '1')->check($token, 42)
+        );
+    }
+
+    public function testTheIssuingAlgorithmIsReadFromTheTokenPluginFormFile(): void
+    {
+        $dir = sys_get_temp_dir() . '/mcp-token-form-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/sha512.xml', '<form><field name="token" type="joomlatoken" algo="sha512"/></form>');
+        file_put_contents($dir . '/none.xml', '<form><field name="token" type="joomlatoken"/></form>');
+
+        try {
+            $this->assertSame('sha512', JoomlaApiTokenOwnershipValidator::algorithmFromFormFile($dir . '/sha512.xml'));
+            $this->assertSame('sha256', JoomlaApiTokenOwnershipValidator::algorithmFromFormFile($dir . '/none.xml'));
+            $this->assertSame('sha256', JoomlaApiTokenOwnershipValidator::algorithmFromFormFile($dir . '/missing.xml'));
+        } finally {
+            array_map('unlink', glob($dir . '/*.xml') ?: []);
+            rmdir($dir);
+        }
+    }
+
     public function testTokenStateIsOkForAUsableToken(): void
     {
         $this->assertSame(

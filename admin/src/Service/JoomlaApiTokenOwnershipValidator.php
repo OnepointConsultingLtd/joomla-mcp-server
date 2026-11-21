@@ -15,10 +15,13 @@ defined('_JEXEC') or die;
 use Joomla\Database\DatabaseInterface;
 
 /**
- * Verifies that a submitted token is the current user's enabled Joomla API token.
+ * Works out a user's current Joomla API token from their account, and checks
+ * whether a given token is that token.
  *
- * Joomla API tokens encode `sha256:userId:hmac` as strict base64. The HMAC is
+ * Joomla API tokens encode `algo:userId:hmac` as strict base64. The HMAC is
  * calculated from the user's `joomlatoken.token` seed and the site secret.
+ * Claiming a credential uses currentToken(); check() is kept for diagnosing a
+ * token someone holds.
  */
 final class JoomlaApiTokenOwnershipValidator
 {
@@ -44,11 +47,47 @@ final class JoomlaApiTokenOwnershipValidator
     public const REASON_NO_SECRET = 'no_secret';
     public const REASON_MISMATCH = 'mismatch';
 
-    /** @param callable(): string $secretProvider */
+    /** @var callable(): string */
+    private $algorithmProvider;
+
+    /**
+     * @param callable(): string      $secretProvider
+     * @param (callable(): string)|null $algorithmProvider The algorithm this site
+     *                                  issues tokens with; see algorithmFromFormFile().
+     */
     public function __construct(
         private readonly DatabaseInterface $db,
         private $secretProvider,
+        ?callable $algorithmProvider = null,
     ) {
+        $this->algorithmProvider = $algorithmProvider ?? static fn (): string => 'sha256';
+    }
+
+    /**
+     * The algorithm plg_user_token issues tokens with, read the way that
+     * plugin's own getAlgorithmFromFormFile() reads it: the algo attribute in
+     * its forms/token.xml, falling back to sha256.
+     */
+    public static function algorithmFromFormFile(string $file): string
+    {
+        $contents = is_file($file) ? @file_get_contents($file) : false;
+
+        if ($contents === false || preg_match('/\s*algo=\s*"\s*([a-z0-9]+)\s*"/i', $contents, $matches) !== 1) {
+            return 'sha256';
+        }
+
+        return $matches[1];
+    }
+
+    /**
+     * The user's current Joomla API token as this site issues it, or why none
+     * can be worked out.
+     *
+     * @return array{reason:self::OK,token:string}|array{reason:string,token:null}
+     */
+    public function currentToken(int $userId): array
+    {
+        return $this->deriveToken($userId, (string) ($this->algorithmProvider)());
     }
 
     public function belongsToUser(string $token, int $userId): bool
@@ -93,30 +132,60 @@ final class JoomlaApiTokenOwnershipValidator
         }
 
         try {
-            $seed = $this->profileValue($userId, self::TOKEN_PROFILE_KEY);
-            $enabled = $this->profileValue($userId, self::ENABLED_PROFILE_KEY);
-            $rawSeed = $seed === null ? false : base64_decode($seed, true);
-            $secret = (string) ($this->secretProvider)();
-
-            if ($rawSeed === false || $rawSeed === '') {
-                return self::REASON_NO_SEED;
-            }
-
-            if ($enabled !== '1') {
-                return self::REASON_NOT_ENABLED;
-            }
-
-            if ($secret === '') {
-                return self::REASON_NO_SECRET;
-            }
-
-            // Hash with the algorithm the token declares, not a fixed one.
-            $expected = hash_hmac($parts[0], $rawSeed, $secret);
-
-            return hash_equals($expected, $parts[2]) ? self::OK : self::REASON_MISMATCH;
+            // Derive with the algorithm the token declares, not a fixed one.
+            $derived = $this->deriveToken($userId, $parts[0]);
         } catch (\Throwable) {
             return self::REASON_MISMATCH;
         }
+
+        if ($derived['token'] === null) {
+            return $derived['reason'];
+        }
+
+        // Compare only the HMAC, as before: the user id has already been
+        // matched numerically, so "042" and "42" are the same user.
+        $expectedHmac = explode(':', (string) base64_decode($derived['token'], true), 3)[2] ?? '';
+
+        return hash_equals($expectedHmac, $parts[2]) ? self::OK : self::REASON_MISMATCH;
+    }
+
+    /**
+     * The user's current Joomla API token, worked out the way plg_user_token
+     * builds the one it displays: base64("algo:userId:hmac(algo, seed, secret)").
+     *
+     * Returns the token, or why none can be worked out. Database failures are
+     * not swallowed here: a caller that is about to store the token must not
+     * mistake an outage for an account problem.
+     *
+     * @return array{reason:self::OK,token:string}|array{reason:string,token:null}
+     */
+    public function deriveToken(int $userId, string $algorithm): array
+    {
+        if (!in_array($algorithm, self::ALLOWED_ALGORITHMS, true)) {
+            return ['reason' => self::REASON_ALGORITHM, 'token' => null];
+        }
+
+        $seed = $this->profileValue($userId, self::TOKEN_PROFILE_KEY);
+        $enabled = $this->profileValue($userId, self::ENABLED_PROFILE_KEY);
+        $rawSeed = $seed === null ? false : base64_decode($seed, true);
+
+        if ($rawSeed === false || $rawSeed === '') {
+            return ['reason' => self::REASON_NO_SEED, 'token' => null];
+        }
+
+        if ($enabled !== '1') {
+            return ['reason' => self::REASON_NOT_ENABLED, 'token' => null];
+        }
+
+        $secret = (string) ($this->secretProvider)();
+        if ($secret === '') {
+            return ['reason' => self::REASON_NO_SECRET, 'token' => null];
+        }
+
+        return [
+            'reason' => self::OK,
+            'token' => base64_encode($algorithm . ':' . $userId . ':' . hash_hmac($algorithm, $rawSeed, $secret)),
+        ];
     }
 
     /**

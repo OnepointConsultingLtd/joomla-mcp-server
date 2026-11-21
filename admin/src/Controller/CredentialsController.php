@@ -143,7 +143,10 @@ class CredentialsController extends BaseController
         $this->setRedirect('index.php?option=com_mcpserver&view=credentials');
     }
 
-    /** Claim an approved request with the request owner's current Joomla API token. */
+    /**
+     * Claim an approved request. The server binds the owner's current Joomla
+     * API token; the owner never submits one.
+     */
     public function claim(): void
     {
         if (!$this->isAuthorisedAndTokenValid()) {
@@ -155,8 +158,7 @@ class CredentialsController extends BaseController
             $result = $this->getCredentialRequestService()->claim(
                 $this->input->post->getString('id', ''),
                 (int) $user->id,
-                (string) $user->username,
-                $this->input->post->getString('api_token', '')
+                (string) $user->username
             );
             $this->app->setUserState('com_mcpserver.credentials.issued', $result);
         } catch (\Throwable $e) {

@@ -118,7 +118,12 @@ return new class implements ServiceProviderInterface {
         $container->share(JoomlaApiTokenOwnershipValidator::class, function () {
             return new JoomlaApiTokenOwnershipValidator(
                 Factory::getDbo(),
-                static fn (): string => (string) Factory::getApplication()->get('secret', '')
+                static fn (): string => (string) Factory::getApplication()->get('secret', ''),
+                // The algorithm plg_user_token issues with, so a claimed
+                // credential carries the same token the owner's account shows.
+                static fn (): string => JoomlaApiTokenOwnershipValidator::algorithmFromFormFile(
+                    JPATH_PLUGINS . '/user/token/forms/token.xml'
+                )
             );
         });
 

@@ -58,29 +58,129 @@ final class CredentialRequestServiceTest extends TestCase
 
     private const NOW = 1_700_000_000;
 
-    public function testApprovedOwnerCanClaimOnceWithoutStoringPendingApiToken(): void
+    /**
+     * Known-good tokens for user 42, seed "seed-bytes", secret "site-secret",
+     * in the format plg_user_token displays: base64("algo:userId:hmac").
+     */
+    private const SHA256_TOKEN_42 = 'c2hhMjU2OjQyOjExMjhmZDRjMmMxYzc1NjliYWI2ZTE0MzY2MmE5N2NmYTFlZWU3MGEyNDlmY2EwYjNmMDhhNzFjYTMwZTcwNTQ=';
+    private const SHA512_TOKEN_42 = 'c2hhNTEyOjQyOmQzNzZjNWZiMGZiODEwYmIwYjdhZmY0OTdjYjZiOGE0NGNlYTFlNjZjMTIwZjJkNjA4OTE4ZGE3MGMwODQxODdkN2JjMDM2MTBiNDQ1MWM2MGVlZGUzMWZlMTFiNTg4ZGE0ZjEwYmU3ZWI5OGE3OTY0Y2Y1ZjNiNTdkNjUxOTY4';
+
+    private function cipher(): CredentialCipher
     {
-        $seed = base64_encode('request-owner-seed');
-        $apiToken = base64_encode('sha256:42:' . hash_hmac('sha256', base64_decode($seed, true), 'site-secret'));
-        $store = new RequestServiceStore();
-        $service = new CredentialRequestService(
+        return new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789'));
+    }
+
+    /** @param list<?string> $profile The owner's token seed, then their enabled flag. */
+    private function service(RequestServiceStore $store, array $profile, string $secret = 'site-secret', string $algorithm = 'sha256'): CredentialRequestService
+    {
+        return new CredentialRequestService(
             $store,
-            new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
-            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase([$seed, '1']), static fn (): string => 'site-secret'),
+            $this->cipher(),
+            new JoomlaApiTokenOwnershipValidator(
+                new RequestServiceDatabase($profile),
+                static fn (): string => $secret,
+                static fn (): string => $algorithm,
+            ),
             static fn (): int => self::NOW,
         );
+    }
+
+    public function testApprovedOwnerClaimsOnceAndTheirOwnJoomlaApiTokenIsStored(): void
+    {
+        $store = new RequestServiceStore();
+        $service = $this->service($store, [base64_encode('seed-bytes'), '1']);
 
         $id = $service->request(42, 'Claude Desktop');
         $this->assertSame('requested', $store->requests[$id]['status']);
         $service->approve($id, 7, true, self::NOW + 3600);
-        $claimed = $service->claim($id, 42, 'Ada Lovelace', $apiToken);
+        $claimed = $service->claim($id, 42, 'Ada Lovelace');
 
         $this->assertSame('1', $claimed['id']);
+        $this->assertStringStartsWith('mcp_', $claimed['bearer_token']);
         $this->assertSame('claimed', $store->requests[$id]['status']);
+        $this->assertSame(self::SHA256_TOKEN_42, $this->cipher()->decrypt($store->credentials[0]['encrypted_token']));
         $this->assertArrayNotHasKey('api_token', $store->requests[$id]);
         $this->assertArrayNotHasKey('api_token', $store->credentials[0]);
         $this->expectException(\RuntimeException::class);
-        $service->claim($id, 42, 'Ada Lovelace', $apiToken);
+        $service->claim($id, 42, 'Ada Lovelace');
+    }
+
+    public function testClaimUsesTheAlgorithmTheSiteIssuesTokensWith(): void
+    {
+        $store = new RequestServiceStore();
+        $service = $this->service($store, [base64_encode('seed-bytes'), '1'], algorithm: 'sha512');
+
+        $id = $service->request(42, 'Claude Desktop');
+        $service->approve($id, 7, true, self::NOW + 3600);
+        $service->claim($id, 42, 'Ada Lovelace');
+
+        $this->assertSame(self::SHA512_TOKEN_42, $this->cipher()->decrypt($store->credentials[0]['encrypted_token']));
+    }
+
+    /** @return array<string,array{0:list<?string>,1:string,2:string}> */
+    public static function ownersWhoseTokenCannotBeWorkedOut(): array
+    {
+        return [
+            'token disabled' => [[base64_encode('seed-bytes'), '0'], 'site-secret', 'is disabled'],
+            'no token yet' => [[null, '1'], 'site-secret', 'has no Joomla API token yet'],
+            'empty site secret' => [[base64_encode('seed-bytes'), '1'], '', 'application secret is empty'],
+        ];
+    }
+
+    /**
+     * @param list<?string> $profile
+     * @dataProvider ownersWhoseTokenCannotBeWorkedOut
+     */
+    public function testClaimIsRefusedWithTheAccountProblemWhenNoTokenCanBeWorkedOut(array $profile, string $secret, string $message): void
+    {
+        $store = new RequestServiceStore();
+        $service = $this->service($store, $profile, $secret);
+        $id = $service->request(42, 'Claude Desktop');
+        $service->approve($id, 7, true, self::NOW + 3600);
+
+        try {
+            $service->claim($id, 42, 'Ada Lovelace');
+            $this->fail('The claim should have been refused');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString($message, $e->getMessage());
+        }
+
+        $this->assertSame([], $store->credentials);
+        $this->assertSame('approved', $store->requests[$id]['status']);
+    }
+
+    public function testAnApprovalWhoseExpiryHasPassedCannotBeClaimed(): void
+    {
+        $now = self::NOW;
+        $store = new RequestServiceStore();
+        $service = new CredentialRequestService(
+            $store,
+            $this->cipher(),
+            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase([base64_encode('seed-bytes'), '1']), static fn (): string => 'site-secret'),
+            static function () use (&$now): int { return $now; },
+        );
+        $id = $service->request(42, 'Claude Desktop');
+        $service->approve($id, 7, true, self::NOW + 3600);
+
+        $now = self::NOW + 3600;
+
+        try {
+            $service->claim($id, 42, 'Ada Lovelace');
+            $this->fail('An expired approval should not be claimable');
+        } catch (\InvalidArgumentException) {
+        }
+        $this->assertSame([], $store->credentials);
+    }
+
+    public function testOnlyTheOwnerCanClaimTheirRequest(): void
+    {
+        $store = new RequestServiceStore();
+        $service = $this->service($store, [base64_encode('seed-bytes'), '1']);
+        $id = $service->request(42, 'Claude Desktop');
+        $service->approve($id, 7, true, self::NOW + 3600);
+
+        $this->expectException(\RuntimeException::class);
+        $service->claim($id, 99, 'Mallory');
     }
 
     public function testSuperUserCanApproveOwnRequest(): void
@@ -127,22 +227,15 @@ final class CredentialRequestServiceTest extends TestCase
      */
     public function testApproverCanGrantANonExpiringCredentialAndItIsClaimable(): void
     {
-        $seed = base64_encode('request-owner-seed');
-        $apiToken = base64_encode('sha256:42:' . hash_hmac('sha256', base64_decode($seed, true), 'site-secret'));
         $store = new RequestServiceStore();
-        $service = new CredentialRequestService(
-            $store,
-            new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
-            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase([$seed, '1']), static fn (): string => 'site-secret'),
-            static fn (): int => self::NOW,
-        );
+        $service = $this->service($store, [base64_encode('seed-bytes'), '1']);
 
         $id = $service->request(42, 'Build agent');
         $service->approve($id, 7, true, null);
 
         $this->assertSame(0, $store->requests[$id]['credential_expires'], 'never-expires is persisted as null/0');
 
-        $claimed = $service->claim($id, 42, 'Ada Lovelace', $apiToken);
+        $claimed = $service->claim($id, 42, 'Ada Lovelace');
 
         $this->assertSame('1', $claimed['id']);
         $this->assertNull(

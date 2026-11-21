@@ -14,8 +14,8 @@ defined('_JEXEC') or die;
 
 /**
  * Owns credential-request transitions. Requests never contain an API token;
- * the owner supplies and proves their current Joomla token only when claiming
- * an approved request.
+ * claiming an approved request binds the owner's current Joomla API token,
+ * which the server works out from their account rather than asking for it.
  */
 final class CredentialRequestService
 {
@@ -77,7 +77,7 @@ final class CredentialRequestService
     }
 
     /** @return array{id:string,bearer_token:string} */
-    public function claim(string $id, int $userId, string $userName, string $apiToken): array
+    public function claim(string $id, int $userId, string $userName): array
     {
         $request = $this->store->find($id);
         $now = $this->now();
@@ -93,13 +93,14 @@ final class CredentialRequestService
         if ((!$neverExpires && $request['credential_expires'] <= $now) || trim($userName) === '') {
             throw new \InvalidArgumentException('Credential request has expired or owner name is blank');
         }
-        $reason = $this->tokenValidator->check($apiToken, $userId);
-        if ($reason !== JoomlaApiTokenOwnershipValidator::OK) {
-            // Say which check failed: these have entirely different fixes, and
-            // a single "does not belong to you" sent people to re-copy a token
-            // that was never the problem.
-            throw new \RuntimeException(self::tokenRejectionMessage($reason));
+        // The owner never handles the token: it is worked out from their own
+        // account, so it cannot be someone else's or the shared one.
+        $derived = $this->tokenValidator->currentToken($userId);
+        if ($derived['token'] === null) {
+            // Say which account problem it is: they have entirely different fixes.
+            throw new \RuntimeException(self::tokenRejectionMessage($derived['reason']));
         }
+        $apiToken = $derived['token'];
 
         $credential = McpCredential::issue();
         $credentialId = $this->store->claimWithCredential($request['id'], [
@@ -148,29 +149,23 @@ final class CredentialRequestService
     private static function tokenRejectionMessage(string $reason): string
     {
         return match ($reason) {
-            JoomlaApiTokenOwnershipValidator::REASON_WRONG_USER =>
-                'That Joomla API token belongs to a different Joomla user. '
-                . 'Generate a token on your own account under Users -> Manage -> [your account] -> API Tokens, '
-                . 'and do not reuse the shared API token from the component options.',
             JoomlaApiTokenOwnershipValidator::REASON_NOT_ENABLED =>
-                'Your Joomla API token exists but is disabled. Enable it under '
+                'Your account\'s Joomla API token is disabled. Enable it under '
                 . 'Users -> Manage -> [your account] -> API Tokens, then claim again.',
             JoomlaApiTokenOwnershipValidator::REASON_NO_SEED =>
-                'Your account has no Joomla API token yet. Open your account and use the API Tokens tab to create one. '
-                . 'If that tab is missing, a Super User must add your user group to the "User - Joomla API Token" '
-                . 'plugin under System -> Plugins -> Allowed User Groups; by default only Super Users are permitted.',
+                'Your account has no Joomla API token yet. Open your account and use the API Tokens tab to create one, '
+                . 'then claim again. If that tab is missing, a Super User must add your user group to the '
+                . '"User - Joomla API Token" plugin under System -> Plugins -> Allowed User Groups; by default only '
+                . 'Super Users are permitted.',
             JoomlaApiTokenOwnershipValidator::REASON_ALGORITHM =>
-                'That token uses an HMAC algorithm this site does not accept. Joomla issues sha256 or sha512 tokens; '
-                . 'regenerate the token and try again.',
+                'This site\'s "User - Joomla API Token" plugin is set to an HMAC algorithm Joomla does not accept. '
+                . 'A Super User must set it to sha256 or sha512.',
             JoomlaApiTokenOwnershipValidator::REASON_NO_SECRET =>
-                'The Joomla application secret is empty, so no API token can be verified. '
-                . 'Check the "secret" value in configuration.php.',
-            JoomlaApiTokenOwnershipValidator::REASON_MALFORMED =>
-                'That does not look like a Joomla API token. Copy the whole token value shown under '
-                . 'Users -> Manage -> [your account] -> API Tokens.',
+                'The Joomla application secret is empty, so no Joomla API token can be worked out. '
+                . 'A Super User must set the "secret" value in configuration.php.',
             default =>
-                'The Joomla API token could not be verified against your account. '
-                . 'Regenerate it under Users -> Manage -> [your account] -> API Tokens and try again.',
+                'Your account\'s Joomla API token could not be worked out. Try again, and ask a Super User '
+                . 'if the problem continues.',
         };
     }
 }

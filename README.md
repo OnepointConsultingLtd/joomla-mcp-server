@@ -2,7 +2,7 @@
 
 A Joomla 4, 5 and 6 component that exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server over HTTP JSON-RPC. It lets MCP clients such as Claude Desktop and Cursor work with Joomla content through the site's own Joomla Web Services API.
 
-**Version:** 1.11.1 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
+**Version:** 1.12.0 · **Requires:** Joomla 4, 5 or 6 · PHP 8.1+ · **Licence:** GPL-2.0-or-later
 
 ## Features
 
@@ -413,7 +413,7 @@ Governed Mode is a single site-wide toggle (`Governed Mode` in **Options → Sec
 
 1. Enable **Governed Mode** in **Options → Security Settings**. **Manage Credentials** appears in the component menu. From this point the shared `API Token` and `MCP Bearer Token` are no longer consulted, and existing clients will be refused until they are migrated.
 2. Open **Manage Credentials** and check the Setup panel above: the credential salt is generated automatically on install/update, so this is normally a confirmation rather than an action.
-3. Each eligible user opens **Manage Credentials** and requests access with the client name. A different Super User reviews the pending request, approves it, and chooses that request's expiry. A Super User cannot approve or reject their own request.
+3. Each eligible user opens **Manage Credentials** and requests access with the client name. A Super User reviews the pending request, approves it, and chooses that request's expiry. Super Users can approve or reject their own requests, so a site with a single administrator can issue itself a credential.
 4. The request owner then opens their approved request, enters their own current Joomla API token, and claims the credential. The component validates the token's ownership only at this step. The one-time bearer token shown must be copied immediately — it is never displayed again — and configured in the client the same way the shared bearer token was (`Authorization: Bearer <token>`, or `HTTP_AUTH_BEARER` for the bundled bridge).
 5. Once every client has claimed and configured its credential, service is restored: each client now authenticates and acts as its own issued credential and its own Joomla user.
 

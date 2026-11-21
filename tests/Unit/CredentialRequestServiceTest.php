@@ -83,7 +83,7 @@ final class CredentialRequestServiceTest extends TestCase
         $service->claim($id, 42, 'Ada Lovelace', $apiToken);
     }
 
-    public function testSuperUserCannotApproveOwnRequestAndExpiryMustBeFuture(): void
+    public function testSuperUserCanApproveOwnRequest(): void
     {
         $store = new RequestServiceStore();
         $service = new CredentialRequestService(
@@ -91,7 +91,30 @@ final class CredentialRequestServiceTest extends TestCase
             new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase(['', '0']), static fn (): string => 'site-secret'), static fn (): int => self::NOW,
         );
         $id = $service->request(42, 'Client');
-        try { $service->approve($id, 42, true, self::NOW + 1); $this->fail('Self approval must fail'); } catch (\RuntimeException) { }
+        $service->approve($id, 42, true, self::NOW + 3600);
+        $this->assertSame('approved', $store->find($id)['status']);
+    }
+
+    public function testSuperUserCanRejectOwnRequest(): void
+    {
+        $store = new RequestServiceStore();
+        $service = new CredentialRequestService(
+            $store, new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
+            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase(['', '0']), static fn (): string => 'site-secret'), static fn (): int => self::NOW,
+        );
+        $id = $service->request(42, 'Client');
+        $service->reject($id, 42, true);
+        $this->assertSame('rejected', $store->find($id)['status']);
+    }
+
+    public function testApprovalExpiryMustBeFuture(): void
+    {
+        $store = new RequestServiceStore();
+        $service = new CredentialRequestService(
+            $store, new CredentialCipher('site-secret', base64_encode('component-salt-bytes-0123456789')),
+            new JoomlaApiTokenOwnershipValidator(new RequestServiceDatabase(['', '0']), static fn (): string => 'site-secret'), static fn (): int => self::NOW,
+        );
+        $id = $service->request(42, 'Client');
         $this->expectException(\InvalidArgumentException::class);
         $service->approve($id, 7, true, self::NOW);
     }

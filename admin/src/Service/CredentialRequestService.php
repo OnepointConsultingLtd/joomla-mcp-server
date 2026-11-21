@@ -62,7 +62,7 @@ final class CredentialRequestService
      */
     public function approve(string $id, int $actorId, bool $isSuperUser, ?int $expiresAt): void
     {
-        $request = $this->requestedByAnotherUser($id, $actorId, $isSuperUser);
+        $request = $this->pendingRequestForSuperUser($id, $isSuperUser);
         $now = $this->now();
         if ($expiresAt !== null && $expiresAt <= $now) {
             throw new \InvalidArgumentException('Credential expiry must be in the future');
@@ -72,7 +72,7 @@ final class CredentialRequestService
 
     public function reject(string $id, int $actorId, bool $isSuperUser): void
     {
-        $request = $this->requestedByAnotherUser($id, $actorId, $isSuperUser);
+        $request = $this->pendingRequestForSuperUser($id, $isSuperUser);
         $this->store->decide($request['id'], 'rejected', $actorId, null, $this->now());
     }
 
@@ -116,7 +116,11 @@ final class CredentialRequestService
     }
 
     /** @return array{id:string,user_id:int,client_name:string,status:string,credential_expires:int,credential_id:?string} */
-    private function requestedByAnotherUser(string $id, int $actorId, bool $isSuperUser): array
+    /**
+     * A Super User may decide any pending request, including their own: on a
+     * site with a single administrator there is nobody else to approve it.
+     */
+    private function pendingRequestForSuperUser(string $id, bool $isSuperUser): array
     {
         if (!$isSuperUser) {
             throw new \RuntimeException('Only a Super User can decide credential requests');
@@ -124,9 +128,6 @@ final class CredentialRequestService
         $request = $this->store->find($id);
         if ($request === null || $request['status'] !== 'requested') {
             throw new \RuntimeException('Credential request is not awaiting a decision');
-        }
-        if ($request['user_id'] === $actorId) {
-            throw new \RuntimeException('Super Users cannot decide their own credential requests');
         }
 
         return $request;

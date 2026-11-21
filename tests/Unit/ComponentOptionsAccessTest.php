@@ -40,12 +40,12 @@ final class ComponentOptionsAccessTest extends TestCase
         };
     }
 
-    public function testConfigureOptionsHolderMayOpenOptions(): void
+    public function testUserGrantedConfigureOptionsMayOpenOptions(): void
     {
         $this->assertTrue(ComponentOptionsAccess::allows(self::user(['core.options', 'mcpserver.credential.self'])));
     }
 
-    public function testConfigureAclAndOptionsHolderMayOpenOptions(): void
+    public function testUserGrantedConfigureAclAndOptionsMayOpenOptions(): void
     {
         // Site-wide core.admin (Super Users) inherits to the component, so this
         // is also the existing behaviour for them.

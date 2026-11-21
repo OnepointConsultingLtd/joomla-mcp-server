@@ -253,8 +253,8 @@ class HtmlView extends BaseHtmlView
         );
 
         // Match the other two views, but only for users who can actually use
-        // it: this page is self-service, so a holder of
-        // mcpserver.credential.self alone must not be offered a component-wide
+        // it: this page is self-service, so a user granted only
+        // mcpserver.credential.self must not be offered a component-wide
         // configuration button com_config will refuse. A group delegated
         // Configure Options (without site-wide admin) does get it.
         if (ComponentOptionsAccess::allows($user)) {

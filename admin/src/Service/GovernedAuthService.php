@@ -57,7 +57,7 @@ final class GovernedAuthService
         }
 
         try {
-            return $this->authenticator->authenticateBearer($token, $now);
+            return $this->authenticator->authenticateCredentialBearerToken($token, $now);
         } catch (\RuntimeException) {
             return ['error' => 'Invalid or expired MCP credential', 'code' => JsonRpc::UNAUTHORIZED];
         }

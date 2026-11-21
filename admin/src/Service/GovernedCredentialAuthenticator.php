@@ -48,9 +48,9 @@ final class GovernedCredentialAuthenticator
     }
 
     /**
-     * @param string $token The bearer token, already taken out of the Authorization header.
+     * @param string $token A credential bearer token, already taken out of the Authorization header.
      */
-    public function authenticateBearer(string $token, callable|DateTimeImmutable $now): AuthenticatedPrincipal
+    public function authenticateCredentialBearerToken(string $token, callable|DateTimeImmutable $now): AuthenticatedPrincipal
     {
         $parsed = McpCredential::parse($token);
         $record = $parsed === null ? null : $this->store->findBySelector($parsed['selector']);

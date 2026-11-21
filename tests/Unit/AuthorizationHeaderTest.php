@@ -17,8 +17,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The single parser every authentication path (legacy, Governed Mode, OAuth)
- * uses to read the Authorization header and take the bearer token out of it.
+ * The single parser that reads the Authorization header and takes the bearer
+ * token out of it, whether that is the shared bearer token, a credential
+ * bearer token or an OAuth access token.
  */
 final class AuthorizationHeaderTest extends TestCase
 {

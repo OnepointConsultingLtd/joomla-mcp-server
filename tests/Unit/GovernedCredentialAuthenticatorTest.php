@@ -90,7 +90,7 @@ final class GovernedCredentialAuthenticatorTest extends TestCase
     {
         $auth = new GovernedCredentialAuthenticator($s['store'], $s['cipher']);
 
-        return $auth->authenticateBearer(
+        return $auth->authenticateCredentialBearerToken(
             $token ?? $s['token'],
             new DateTimeImmutable($now ?? self::NOW)
         );

@@ -14,8 +14,8 @@ defined('_JEXEC') or die;
 
 /**
  * The one place that reads the request's Authorization header and takes the
- * bearer token out of it. Legacy, Governed Mode and OAuth authentication all
- * go through here.
+ * bearer token out of it. The shared bearer token, credential bearer tokens
+ * and OAuth access tokens are all read here.
  *
  * Under CGI/FastCGI, PHP does not see the header itself; the usual
  * `RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]` restores

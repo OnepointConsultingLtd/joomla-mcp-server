@@ -15,7 +15,7 @@
         <tags>
             <tag>stable</tag>
         </tags>
-        <sha256>d0d47b59bd88456c5907080e117146911da0aea1a37d132e690429da12e2ccac</sha256>
+        <sha256>d7cb797ef1daf2d26ab2af26eb39022d6da36306b98a304eab0e03400fc3d34a</sha256>
         <targetplatform name="joomla" version="((4\.)|(5\.)|(6\.))" />
         <php_minimum>8.1</php_minimum>
         <maintainer>Onepoint Consulting Ltd</maintainer>
@@ -36,7 +36,7 @@
         <tags>
             <tag>stable</tag>
         </tags>
-        <sha256>d0d47b59bd88456c5907080e117146911da0aea1a37d132e690429da12e2ccac</sha256>
+        <sha256>d7cb797ef1daf2d26ab2af26eb39022d6da36306b98a304eab0e03400fc3d34a</sha256>
         <targetplatform name="joomla" version="((4\.)|(5\.)|(6\.))" />
         <php_minimum>8.1</php_minimum>
         <maintainer>Onepoint Consulting Ltd</maintainer>

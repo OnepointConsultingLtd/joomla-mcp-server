@@ -17,7 +17,8 @@ use Joomla\CMS\Language\Text;
 use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 
 /**
- * The OAuth consent page and its error page. Rendered only by
+ * The OAuth consent page, its error page, and the page confirming an
+ * approval before the browser returns to the client. Rendered only by
  * OauthController, which fills $oauth; never reached through view=authorize.
  */
 class HtmlView extends BaseHtmlView

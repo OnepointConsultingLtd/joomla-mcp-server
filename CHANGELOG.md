@@ -16,6 +16,7 @@ All notable release changes for MCP Server for Joomla are recorded here.
 - Added a `WWW-Authenticate` header to HTTP 401 responses from the MCP endpoint while OAuth Sign-in is on, pointing OAuth-capable clients at the site's Protected Resource Metadata.
 - The **Legacy Shared API Token** option is now called **Shared Joomla API Token**. Its stored value is unchanged.
 - The `Authorization` header's `Bearer` scheme is now accepted in any letter case (`bearer`, `BEARER`), as RFC 7235 requires, in shared-token mode and Governed Mode, and for OAuth access tokens. Previously only `Bearer` was accepted.
+- After approving an MCP client on the OAuth consent page, the user now sees a confirmation page in the site's template naming the client, the site and themselves, which then returns them to the client automatically or through a **Continue** button. Previously the browser went straight to the client's own page, which for a CLI client is often a bare line of text. Denying, and requests the site refuses, still return straight to the client.
 
 ## 1.11.1 - 2026-11-13
 

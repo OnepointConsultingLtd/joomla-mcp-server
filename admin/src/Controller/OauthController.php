@@ -214,7 +214,27 @@ class OauthController extends BaseController
             return;
         }
 
-        $this->redirectToClient($url);
+        $this->renderApproval($request, (string) $user->name, $url);
+    }
+
+    /**
+     * Confirms the approval on a page in the site's template, which then hands
+     * the browser on to the client. Deny and error outcomes skip it: there is
+     * nothing to confirm, so they go straight back to the client.
+     */
+    private function renderApproval(OAuthAuthorizationRequest $request, string $userName, string $redirectUrl): void
+    {
+        $app = Factory::getApplication();
+        // The page holds the authorisation code in its hand-over link; send
+        // no Referer from it, to the client or to anything its template loads.
+        $app->setHeader('Referrer-Policy', 'no-referrer', true);
+
+        $this->renderOAuthPage('approved', [
+            'clientName' => $request->clientName,
+            'siteName' => (string) $app->get('sitename'),
+            'userName' => $userName,
+            'redirectUrl' => $redirectUrl,
+        ]);
     }
 
     /**

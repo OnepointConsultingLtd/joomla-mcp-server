@@ -3,9 +3,9 @@
     <update>
         <name>MCP Server for Joomla</name>
         <description>Model Context Protocol server for Joomla</description>
-        <element>pkg_mcpserver</element>
-        <type>package</type>
-        <client>site</client>
+        <element>com_mcpserver</element>
+        <type>component</type>
+        <client>administrator</client>
         <version>1.12.0</version>
         <infourl title="MCP Server for Joomla 1.12.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.12.0</infourl>
         <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>
@@ -24,9 +24,9 @@
     <update>
         <name>MCP Server for Joomla</name>
         <description>Model Context Protocol server for Joomla</description>
-        <element>com_mcpserver</element>
-        <type>component</type>
-        <client>administrator</client>
+        <element>pkg_mcpserver</element>
+        <type>package</type>
+        <client>site</client>
         <version>1.12.0</version>
         <infourl title="MCP Server for Joomla 1.12.0">https://github.com/OnepointConsultingLtd/joomla-mcp-server/releases/tag/v1.12.0</infourl>
         <changelogurl>https://raw.githubusercontent.com/OnepointConsultingLtd/joomla-mcp-server/master/changelog.xml</changelogurl>

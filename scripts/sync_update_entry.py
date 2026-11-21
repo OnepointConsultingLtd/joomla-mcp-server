@@ -18,6 +18,13 @@ earlier) are only ever offered updates for the component, and installing the
 package from it puts them on the package's update stream. Later versions have
 no component entry, so a packaged site is never offered the same update twice.
 
+The component entry must come before the package entry. Joomla's
+ExtensionAdapter keeps one update per feed, whatever its <element>: the
+highest version, and of equal versions the first one read. The component and
+the package share this feed's URL, so if the package entry came first it would
+be the only update kept, and a site with just the component installed would
+match nothing and never be offered 1.12.0.
+
 Every entry carries <changelogurl>, which is what makes the Changelog column in
 Extensions: Update render a link instead of "N/A": Joomla's UpdateAdapter copies
 that element into #__updates.changelogurl, and the view keys the link off that
@@ -59,7 +66,7 @@ COMPONENT = {"element": "com_mcpserver", "kind": "component", "client": "adminis
 
 def targets(version):
     """The extensions an entry for this version is written for, in feed order."""
-    return [PACKAGE, COMPONENT] if version == MIGRATION_VERSION else [PACKAGE]
+    return [COMPONENT, PACKAGE] if version == MIGRATION_VERSION else [PACKAGE]
 
 
 def find_block(xml, version, element):

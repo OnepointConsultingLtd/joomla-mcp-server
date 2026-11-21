@@ -27,11 +27,11 @@ use DateTimeZone;
 final class GovernedAuthService
 {
     /**
-     * @param callable(string $name, string $default): string $serverInput Reads a server variable, e.g. $input->server->getString(...).
+     * @param object $server The request's server input (`$app->input->server`), read via AuthorizationHeader.
      */
     public function __construct(
         private GovernedCredentialAuthenticator $authenticator,
-        private $serverInput,
+        private object $server,
         private ?OAuthTokenAuthenticator $oauthAuthenticator = null,
     ) {
     }
@@ -41,7 +41,7 @@ final class GovernedAuthService
      */
     public function authenticate(): AuthenticatedPrincipal|array
     {
-        $header = AuthorizationHeader::read($this->serverInput);
+        $header = AuthorizationHeader::read($this->server);
 
         if (empty($header)) {
             return ['error' => 'Missing bearer token in Authorization header', 'code' => JsonRpc::UNAUTHORIZED];
@@ -50,14 +50,14 @@ final class GovernedAuthService
         // UTC explicitly: credential expiries are stored in UTC, so an ambient
         // date.timezone would shift every expiry check by the offset.
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $token = str_starts_with($header, 'Bearer ') ? substr($header, 7) : '';
+        $token = AuthorizationHeader::bearerToken($header) ?? '';
 
         if ($this->oauthAuthenticator !== null && OAuthTokenAuthenticator::isAccessToken($token)) {
             return $this->authenticateOAuth($token, $now);
         }
 
         try {
-            return $this->authenticator->authenticateBearer($header, $now);
+            return $this->authenticator->authenticateBearer($token, $now);
         } catch (\RuntimeException) {
             return ['error' => 'Invalid or expired MCP credential', 'code' => JsonRpc::UNAUTHORIZED];
         }
@@ -72,12 +72,12 @@ final class GovernedAuthService
             $grant = $this->oauthAuthenticator->authenticate($token, $now);
             $principal = $this->authenticator->authenticateBoundCredential($grant->credentialSelector, $now);
         } catch (\RuntimeException) {
-            return ['error' => 'Invalid or expired OAuth access token', 'code' => JsonRpc::UNAUTHORIZED];
+            return ['error' => OAuthTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
         }
 
         // The grant recorded who consented; the credential must still be theirs.
         if ($principal->userId !== $grant->userId || $principal->credentialId !== $grant->credentialId) {
-            return ['error' => 'Invalid or expired OAuth access token', 'code' => JsonRpc::UNAUTHORIZED];
+            return ['error' => OAuthTokenAuthenticator::FAILURE, 'code' => JsonRpc::UNAUTHORIZED];
         }
 
         return $principal;

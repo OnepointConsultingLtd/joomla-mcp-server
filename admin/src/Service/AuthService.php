@@ -111,14 +111,7 @@ class AuthService
                 return ['error' => 'Authentication required but no server token configured', 'code' => JsonRpc::FORBIDDEN];
             }
 
-            $authHeader = AuthorizationHeader::read(
-                static fn (string $name, string $default): string => $input->server->getString($name, $default)
-            );
-
-            $providedToken = '';
-            if (str_starts_with($authHeader, 'Bearer ')) {
-                $providedToken = substr($authHeader, 7);
-            }
+            $providedToken = AuthorizationHeader::bearerTokenFrom($input->server) ?? '';
 
             if (empty($providedToken)) {
                 return ['error' => 'Missing bearer token in Authorization header', 'code' => JsonRpc::UNAUTHORIZED];

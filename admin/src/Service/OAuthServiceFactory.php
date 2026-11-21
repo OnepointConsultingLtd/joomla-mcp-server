@@ -83,11 +83,7 @@ final class OAuthServiceFactory
 
         return new OAuthEndpoints(
             self::server($params),
-            new RateLimiter(
-                new JoomlaCache('com_mcpserver_ratelimit'),
-                (int) $params->get('rate_limit_requests', 60),
-                (int) $params->get('rate_limit_window', 60)
-            ),
+            RateLimiter::fromParams($params),
             (string) $params->get('server_name', 'joomla-mcp-server')
         );
     }
@@ -102,7 +98,7 @@ final class OAuthServiceFactory
             self::rawParams($input->get, ['resource']),
             self::rawParams($input->post, self::POST_PARAMS),
             (string) file_get_contents('php://input'),
-            AuthorizationHeader::read(static fn (string $name, string $default): string => $input->server->getString($name, $default)),
+            AuthorizationHeader::read($input->server),
             (new AuthService($params))->getClientIp() ?: 'unknown',
         );
     }

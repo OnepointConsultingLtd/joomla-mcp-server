@@ -104,6 +104,58 @@ final class OAuthConfigTest extends TestCase
         $this->assertSame($expected, OAuthConfig::routeForPath($path, $root));
     }
 
+    /**
+     * Clients that build /.well-known/oauth-protected-resource/<path> from the
+     * MCP endpoint keep only its path, so the query string that makes it the
+     * MCP endpoint has to be restored.
+     *
+     * @return array<string,array{0:string,1:string,2:string,3:string}>
+     */
+    public static function wellKnownResourcePaths(): array
+    {
+        $endpoint = 'https://example.com/index.php?option=com_mcpserver&task=rpc.handle';
+        $subdirEndpoint = 'https://example.com/joomla/index.php?option=com_mcpserver&task=rpc.handle';
+
+        return [
+            'URL rewriting' => ['/.well-known/oauth-protected-resource/index.php', '', 'https://example.com/', $endpoint],
+            'no URL rewriting (PATH_INFO)' => ['/index.php/.well-known/oauth-protected-resource/index.php', '', 'https://example.com/', $endpoint],
+            'subdirectory site, URL rewriting' => ['/joomla/.well-known/oauth-protected-resource/joomla/index.php', '/joomla', 'https://example.com/joomla/', $subdirEndpoint],
+            'subdirectory site, no URL rewriting' => ['/joomla/index.php/.well-known/oauth-protected-resource/joomla/index.php', '/joomla', 'https://example.com/joomla/', $subdirEndpoint],
+            'well-known at the web root, subdirectory site' => ['/.well-known/oauth-protected-resource/joomla/index.php', '/joomla', 'https://example.com/joomla/', $subdirEndpoint],
+            'endpoint at the subdirectory itself' => ['/joomla/.well-known/oauth-protected-resource/joomla/', '/joomla', 'https://example.com/joomla/', 'https://example.com/joomla/?option=com_mcpserver&task=rpc.handle'],
+            'any other path is named as asked' => ['/.well-known/oauth-protected-resource/component/mcpserver/rpc.handle', '', 'https://example.com/', 'https://example.com/component/mcpserver/rpc.handle'],
+        ];
+    }
+
+    /**
+     * @dataProvider wellKnownResourcePaths
+     */
+    public function testWellKnownSuffixNamesTheMcpEndpointWithItsQueryString(string $path, string $root, string $siteRoot, string $expected): void
+    {
+        $route = OAuthConfig::routeForPath($path, $root);
+        $this->assertNotNull($route);
+        [$endpoint, $suffix] = $route;
+        $this->assertSame(OAuthEndpoints::PROTECTED_RESOURCE, $endpoint);
+
+        $config = new OAuthConfig($siteRoot, str_contains($path, 'index.php/') === false);
+        $resource = $config->resourceForWellKnownPath('https://example.com', $suffix);
+
+        $this->assertSame($expected, $resource);
+        $this->assertTrue($config->ownsResource($resource), 'the metadata must name the resource rather than fall back to the default');
+    }
+
+    public function testWellKnownSuffixGivesTheSameResourceAsTheResourceMetadataLink(): void
+    {
+        $config = new OAuthConfig('https://example.com/');
+        // What the 401's resource_metadata link carries for a client connected
+        // to the MCP endpoint (RpcHandlerTrait::sendOAuthChallenge()).
+        $connectedTo = 'https://example.com/index.php?option=com_mcpserver&task=rpc.handle';
+        parse_str((string) parse_url($config->protectedResourceMetadataUrl($connectedTo), PHP_URL_QUERY), $linkQuery);
+
+        $this->assertSame($linkQuery['resource'], $config->resourceForWellKnownPath('https://example.com', 'index.php'));
+        $this->assertSame($config->defaultResource(), $config->resourceForWellKnownPath('https://example.com/', '/index.php'));
+    }
+
     public function testLoopbackRedirectsMatchAcrossPortsButNothingElseDoes(): void
     {
         $this->assertTrue(OAuthRedirectUriPolicy::matches('http://127.0.0.1/cb', 'http://127.0.0.1:5000/cb'));

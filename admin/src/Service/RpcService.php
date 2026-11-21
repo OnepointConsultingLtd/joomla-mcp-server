@@ -55,7 +55,7 @@ class RpcService
      * counters. The component's read cache (com_mcpserver) IS cleared on
      * purpose — it may hold the same stale content the caller is flushing.
      */
-    private const PROTECTED_CACHE_GROUPS = ['mcp_sse', 'com_mcpserver_ratelimit'];
+    private const PROTECTED_CACHE_GROUPS = ['mcp_sse', RateLimiter::CACHE_GROUP];
 
     /**
      * The one element whose Options the params tools refuse to touch: this

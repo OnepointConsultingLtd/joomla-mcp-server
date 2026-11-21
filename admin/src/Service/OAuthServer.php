@@ -365,21 +365,21 @@ final class OAuthServer
 
         $record = $this->store->consumeCode(self::hash($code), $now);
         if ($record === null) {
-            throw new OAuthError('invalid_grant', 'Invalid authorization code');
+            throw new OAuthError('invalid_grant', 'Invalid authorisation code');
         }
 
         if ($record->alreadyUsed) {
             // A code redeemed twice has leaked. Revoke whatever the first
             // redemption produced (OAuth 2.1 §4.1.3).
             $this->store->revokeGrant($record->grantId, $now);
-            throw new OAuthError('invalid_grant', 'Authorization code has already been used');
+            throw new OAuthError('invalid_grant', 'Authorisation code has already been used');
         }
 
         $redirectUri = self::stringParam($post, 'redirect_uri');
         $fails = match (true) {
-            $record->expires <= $now => 'Authorization code has expired',
-            !hash_equals($record->clientId, $client->clientId) => 'Authorization code was issued to another client',
-            $redirectUri !== null && !hash_equals($record->redirectUri, $redirectUri) => 'redirect_uri does not match the authorization request',
+            $record->expires <= $now => 'Authorisation code has expired',
+            !hash_equals($record->clientId, $client->clientId) => 'Authorisation code was issued to another client',
+            $redirectUri !== null && !hash_equals($record->redirectUri, $redirectUri) => 'redirect_uri does not match the authorisation request',
             preg_match('/^[A-Za-z0-9._~-]{43,128}$/D', $verifier) !== 1,
             !hash_equals($record->codeChallenge, self::base64Url(hash('sha256', $verifier, true))) => 'PKCE verification failed',
             default => null,

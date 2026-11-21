@@ -174,9 +174,7 @@ return new class implements ServiceProviderInterface {
 
             return new GovernedAuthService(
                 $container->get(GovernedCredentialAuthenticator::class),
-                static function (string $name, string $default): string {
-                    return Factory::getApplication()->input->server->getString($name, $default);
-                },
+                Factory::getApplication()->input->server,
                 // OAuth access tokens are accepted only while OAuth is switched
                 // on, so turning it off ends all OAuth access at once.
                 OAuthConfig::isEnabled($params)
@@ -240,13 +238,7 @@ return new class implements ServiceProviderInterface {
 
         // Rate limiter
         $container->share(RateLimiter::class, function () {
-            $params = ComponentHelper::getParams('com_mcpserver');
-            $cacheBackend = new JoomlaCache('com_mcpserver_ratelimit');
-            return new RateLimiter(
-                $cacheBackend,
-                (int) $params->get('rate_limit_requests', 60),
-                (int) $params->get('rate_limit_window', 60)
-            );
+            return RateLimiter::fromParams(ComponentHelper::getParams('com_mcpserver'));
         });
 
         // Metrics service

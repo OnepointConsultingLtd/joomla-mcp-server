@@ -80,9 +80,13 @@ final class Mcpserver extends CMSPlugin implements SubscriberInterface
         $request = OAuthServiceFactory::currentRequest($app->input, $params);
 
         // RFC 9728 §3.1: /.well-known/oauth-protected-resource/<path> asks
-        // about the resource at <path> on this origin.
+        // about the resource at <path> on this origin. The path has lost the
+        // MCP endpoint's query string; OAuthConfig maps it back.
         if ($endpoint === OAuthEndpoints::PROTECTED_RESOURCE && $suffix !== '' && $request->queryParam('resource') === null) {
-            $request = $request->withQueryParam('resource', Uri::getInstance()->toString(['scheme', 'host', 'port']) . '/' . $suffix);
+            $request = $request->withQueryParam(
+                'resource',
+                OAuthServiceFactory::config($params)->resourceForWellKnownPath(Uri::getInstance()->toString(['scheme', 'host', 'port']), $suffix)
+            );
         }
 
         OAuthServiceFactory::endpoints($params)->handle($endpoint, $request)->send();

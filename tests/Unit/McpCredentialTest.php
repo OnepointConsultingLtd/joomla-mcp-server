@@ -21,7 +21,7 @@ class McpCredentialTest extends TestCase
     {
         $credential = McpCredential::issue();
 
-        $parsed = McpCredential::parseBearer('Bearer ' . $credential['token']);
+        $parsed = McpCredential::parse($credential['token']);
 
         $this->assertNotNull($parsed);
         $this->assertSame($credential['selector'], $parsed['selector']);
@@ -43,7 +43,7 @@ class McpCredentialTest extends TestCase
         $selector = 'Ab+/Cd+eF/gh-_ij';
         $secret = str_repeat('a+b/', 10) . 'c-_';
 
-        $parsed = McpCredential::parseBearer('Bearer mcp_' . $selector . '.' . $secret);
+        $parsed = McpCredential::parse('mcp_' . $selector . '.' . $secret);
 
         $this->assertSame(['selector' => $selector, 'secret' => $secret], $parsed);
     }
@@ -52,8 +52,8 @@ class McpCredentialTest extends TestCase
     {
         $credential = McpCredential::issue();
 
-        $this->assertNull(McpCredential::parseBearer('Basic ' . $credential['token']));
-        $this->assertNull(McpCredential::parseBearer('Bearer mcp_invalid'));
+        $this->assertNull(McpCredential::parse('Bearer ' . $credential['token']), 'the header scheme is stripped before parsing');
+        $this->assertNull(McpCredential::parse('mcp_invalid'));
         $this->assertFalse(McpCredential::verify('wrong-secret', $credential['verifier']));
     }
 }

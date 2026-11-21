@@ -100,7 +100,7 @@ final class OAuthGovernedAuthTest extends TestCase
     {
         $service = new GovernedAuthService(
             new GovernedCredentialAuthenticator($this->credentialStore, $this->cipher),
-            static fn (string $name, string $default): string => $name === 'HTTP_AUTHORIZATION' ? $header : $default,
+            FakeServerInput::withAuthorization($header),
             $oauthEnabled ? new OAuthTokenAuthenticator($this->oauthStore, new OAuthConfig('https://example.com/'), $requestUrl) : null
         );
 

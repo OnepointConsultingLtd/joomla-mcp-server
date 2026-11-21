@@ -47,15 +47,13 @@ final class McpCredential
     }
 
     /**
+     * Splits a credential bearer token (`mcp_<selector>.<secret>`), as taken
+     * out of the Authorization header by AuthorizationHeader::bearerToken().
+     *
      * @return array{selector:string,secret:string}|null
      */
-    public static function parseBearer(string $header): ?array
+    public static function parse(string $token): ?array
     {
-        if (!str_starts_with($header, 'Bearer ')) {
-            return null;
-        }
-
-        $token = substr($header, 7);
         // '+' and '/' are accepted for tokens issued by the 1.8.0-1.10.1 packages, whose build
         // step broke encode() into emitting standard base64. The selector and secret are matched
         // as stored, so those tokens keep working without being reissued.

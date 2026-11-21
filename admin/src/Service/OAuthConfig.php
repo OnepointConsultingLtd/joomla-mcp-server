@@ -33,6 +33,9 @@ final class OAuthConfig
     /** The endpoints the plugin answers under ENDPOINT_PREFIX. */
     public const ENDPOINTS = [OAuthEndpoints::AUTHORIZE, OAuthEndpoints::TOKEN, OAuthEndpoints::REGISTER, OAuthEndpoints::REVOKE];
 
+    /** The query string that makes the site's front controller the MCP endpoint. */
+    private const MCP_ENDPOINT_QUERY = 'option=com_mcpserver&task=rpc.handle';
+
     private const WELL_KNOWN = [
         '.well-known/oauth-authorization-server' => OAuthEndpoints::AUTHORIZATION_SERVER,
         '.well-known/oauth-protected-resource' => OAuthEndpoints::PROTECTED_RESOURCE,
@@ -140,7 +143,42 @@ final class OAuthConfig
     /** The MCP endpoint, used as the resource when a client names none. */
     public function defaultResource(): string
     {
-        return $this->componentUrl('rpc.handle');
+        return $this->siteRoot . 'index.php?' . self::MCP_ENDPOINT_QUERY;
+    }
+
+    /**
+     * The resource a `/.well-known/oauth-protected-resource/<path>` request
+     * asks about (RFC 9728 §3.1). Only clients that ignore the
+     * resource_metadata link in WWW-Authenticate and build that URL from the
+     * MCP endpoint themselves get here.
+     *
+     * The well-known URL keeps only the endpoint's path, so the query string
+     * that makes it the MCP endpoint (`?option=com_mcpserver&task=rpc.handle`)
+     * is lost and <path> is just the site's front controller. That path is
+     * mapped back to the MCP endpoint at the same URL, so the token is bound
+     * to the same resource the resource_metadata link would have named. Any
+     * other path is named as asked; ownsResource() still decides whether it
+     * is accepted.
+     *
+     * @param string $origin The request's scheme, host and port (`https://example.com`).
+     * @param string $path   The path after the well-known name, as routeForPath() returns it.
+     */
+    public function resourceForWellKnownPath(string $origin, string $path): string
+    {
+        $path = trim($path, '/');
+        $rootPath = trim((string) parse_url($this->siteRoot, PHP_URL_PATH), '/');
+        $frontController = ltrim($rootPath . '/index.php', '/');
+        $url = rtrim($origin, '/') . '/';
+
+        if ($path === $frontController) {
+            return $url . $path . '?' . self::MCP_ENDPOINT_QUERY;
+        }
+
+        if ($path === $rootPath) {
+            return $url . ($path === '' ? '' : $path . '/') . '?' . self::MCP_ENDPOINT_QUERY;
+        }
+
+        return $url . $path;
     }
 
     /**

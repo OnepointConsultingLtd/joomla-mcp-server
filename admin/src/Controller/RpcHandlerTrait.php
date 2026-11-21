@@ -71,7 +71,7 @@ trait RpcHandlerTrait
 
         // Throttle stream establishment before auth: each SSE connection holds a
         // PHP worker for the lifetime below, so unbounded opens are a DoS vector.
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Content-Type: application/json; charset=utf-8');
@@ -235,7 +235,7 @@ trait RpcHandlerTrait
 
         // Rate limit BEFORE authentication so failed auth attempts (bearer-token
         // guessing) are throttled too. Keyed on the proxy-aware client IP.
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Retry-After: ' . $rateLimit['retry_after']);
@@ -477,7 +477,7 @@ trait RpcHandlerTrait
         $authService = $this->resolveService(AuthService::class) ?? new AuthService($params);
         $clientIp    = $authService->getClientIp() ?: 'unknown';
 
-        $rateLimiter = $this->resolveService(RateLimiter::class) ?? $this->createRateLimiter($params);
+        $rateLimiter = $this->resolveService(RateLimiter::class) ?? RateLimiter::fromParams($params);
         $rateLimit = $rateLimiter->checkLimit($clientIp);
         if ($rateLimit !== null) {
             header('Retry-After: ' . $rateLimit['retry_after']);
@@ -812,8 +812,7 @@ trait RpcHandlerTrait
         $challenge = 'Bearer resource_metadata="' . $config->protectedResourceMetadataUrl($resource) . '", scope="' . OAuthServer::SCOPE . '"';
 
         // RFC 6750 §3.1: no error code when no credentials were sent at all.
-        $server = $app->input->server;
-        if (AuthorizationHeader::read(static fn (string $name, string $default): string => $server->getString($name, $default)) !== '') {
+        if (AuthorizationHeader::read($app->input->server) !== '') {
             $challenge .= ', error="invalid_token"';
         }
 
@@ -1052,19 +1051,6 @@ trait RpcHandlerTrait
     private function createMetricsService(Registry $params): MetricsService
     {
         return new MetricsService($params);
-    }
-
-    /**
-     * Fallback: create RateLimiter when DI container is not available.
-     */
-    private function createRateLimiter(Registry $params): RateLimiter
-    {
-        $cacheBackend = new JoomlaCache('com_mcpserver_ratelimit');
-        return new RateLimiter(
-            $cacheBackend,
-            (int) $params->get('rate_limit_requests', 60),
-            (int) $params->get('rate_limit_window', 60)
-        );
     }
 
     /**

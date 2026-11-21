@@ -136,7 +136,7 @@ class CredentialLifecycleServiceTest extends TestCase
 
         $issued = $service->issue(42, 'Ada Lovelace', 'super-secret-api-token', self::NOW + 3600, self::NOW);
 
-        $this->assertNotNull(McpCredential::parseBearer('Bearer ' . $issued['bearer_token']));
+        $this->assertNotNull(McpCredential::parse($issued['bearer_token']));
 
         $stored = $store->records[$issued['id']];
         $this->assertArrayNotHasKey('token', $stored);
@@ -155,7 +155,7 @@ class CredentialLifecycleServiceTest extends TestCase
         $decrypted = $this->cipher()->decrypt($stored['encrypted_token']);
         $this->assertSame('super-secret-api-token', $decrypted);
 
-        $parsedBearer = McpCredential::parseBearer('Bearer ' . $issued['bearer_token']);
+        $parsedBearer = McpCredential::parse($issued['bearer_token']);
         $this->assertTrue(McpCredential::verify($parsedBearer['secret'], $stored['verifier']));
     }
 

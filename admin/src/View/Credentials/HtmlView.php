@@ -20,6 +20,7 @@ use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 use Joomla\CMS\Toolbar\ToolbarHelper;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Component\Mcpserver\Administrator\Extension\McpserverComponent;
+use Joomla\Component\Mcpserver\Administrator\Service\ComponentOptionsAccess;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialLifecycleService;
 use Joomla\Component\Mcpserver\Administrator\Service\CredentialRequestService;
 use Joomla\Component\Mcpserver\Administrator\Service\GovernanceSetupService;
@@ -252,10 +253,11 @@ class HtmlView extends BaseHtmlView
         );
 
         // Match the other two views, but only for users who can actually use
-        // it: this page is self-service, so a non-admin holder of
-        // mcpserver.credential.self must not be offered a component-wide
-        // configuration button they cannot open.
-        if ($this->isCoreAdmin) {
+        // it: this page is self-service, so a holder of
+        // mcpserver.credential.self alone must not be offered a component-wide
+        // configuration button com_config will refuse. A group delegated
+        // Configure Options (without site-wide admin) does get it.
+        if (ComponentOptionsAccess::allows($user)) {
             ToolbarHelper::preferences('com_mcpserver');
         }
 

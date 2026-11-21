@@ -539,12 +539,13 @@ final class OAuthServerTest extends TestCase
         ['client' => $client, 'code' => $code] = $this->obtainCode();
         $this->now = $this->now->modify('+301 seconds');
 
-        $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
+        $e = $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
             'grant_type' => 'authorization_code',
             'client_id' => $client['client_id'],
             'code' => $code,
             'code_verifier' => self::VERIFIER,
         ], ''));
+        $this->assertSame('Authorisation code has expired', $e->description);
     }
 
     public function testCodeIssuedToAnotherClientIsRefused(): void
@@ -552,12 +553,13 @@ final class OAuthServerTest extends TestCase
         ['code' => $code] = $this->obtainCode();
         $other = $this->registerPublic();
 
-        $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
+        $e = $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
             'grant_type' => 'authorization_code',
             'client_id' => $other['client_id'],
             'code' => $code,
             'code_verifier' => self::VERIFIER,
         ], ''));
+        $this->assertSame('Authorisation code was issued to another client', $e->description);
     }
 
     public function testReusedCodeIsRefusedAndRevokesWhatTheFirstUseIssued(): void
@@ -571,11 +573,67 @@ final class OAuthServerTest extends TestCase
         ];
         $tokens = $this->server->token($post, '');
 
-        $this->assertOAuthError('invalid_grant', fn () => $this->server->token($post, ''));
+        $e = $this->assertOAuthError('invalid_grant', fn () => $this->server->token($post, ''));
+        $this->assertSame('Authorisation code has already been used', $e->description);
 
         $authenticator = $this->authenticator();
         $this->expectException(\RuntimeException::class);
         $authenticator->authenticate($tokens['access_token'], $this->now);
+    }
+
+    /**
+     * A client that discovered the metadata at
+     * /.well-known/oauth-protected-resource/index.php asks for the resource
+     * that metadata named; the token must be bound to the MCP endpoint and work
+     * there.
+     */
+    public function testTokenFromWellKnownSuffixDiscoveryIsBoundToTheMcpEndpoint(): void
+    {
+        $config = new OAuthConfig(self::SITE);
+        $resource = $config->resourceForWellKnownPath('https://example.com', 'index.php');
+        $client = $this->registerPublic();
+
+        $request = $this->server->validateAuthorizationRequest($this->authorizeParams($client['client_id'], ['resource' => $resource]));
+        $code = self::redirectQuery($this->server->approve($request, self::USER, self::CREDENTIAL))['code'];
+        $tokens = $this->server->token([
+            'grant_type' => 'authorization_code',
+            'client_id' => $client['client_id'],
+            'code' => $code,
+            'code_verifier' => self::VERIFIER,
+            'resource' => $resource,
+        ], '');
+
+        $record = $this->authenticator()->authenticate($tokens['access_token'], $this->now);
+
+        $this->assertSame(self::SITE . 'index.php?option=com_mcpserver&task=rpc.handle', $record->resource);
+        $this->assertSame($config->defaultResource(), $record->resource);
+    }
+
+    public function testRedirectUriMismatchAtExchangeIsRefused(): void
+    {
+        ['client' => $client, 'code' => $code] = $this->obtainCode();
+
+        $e = $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
+            'grant_type' => 'authorization_code',
+            'client_id' => $client['client_id'],
+            'code' => $code,
+            'code_verifier' => self::VERIFIER,
+            'redirect_uri' => 'https://client.example/other',
+        ], ''));
+        $this->assertSame('redirect_uri does not match the authorisation request', $e->description);
+    }
+
+    public function testUnknownCodeIsRefusedInBritishEnglish(): void
+    {
+        $client = $this->registerPublic();
+
+        $e = $this->assertOAuthError('invalid_grant', fn () => $this->server->token([
+            'grant_type' => 'authorization_code',
+            'client_id' => $client['client_id'],
+            'code' => 'mcpac_unknown',
+            'code_verifier' => self::VERIFIER,
+        ], ''));
+        $this->assertSame('Invalid authorisation code', $e->description);
     }
 
     public function testConfidentialClientMustAuthenticateWithItsSecret(): void

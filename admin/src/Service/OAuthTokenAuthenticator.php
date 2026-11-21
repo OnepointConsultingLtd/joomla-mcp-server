@@ -30,7 +30,11 @@ final class OAuthTokenAuthenticator
 {
     public const PREFIX = 'mcpat_';
 
-    private const FAILURE = 'Invalid or expired OAuth access token';
+    /**
+     * The one message for every rejected OAuth access token, whichever check
+     * failed, so callers cannot tell an unknown token from an expired one.
+     */
+    public const FAILURE = 'Invalid or expired OAuth access token';
 
     /**
      * @param string $requestUrl The URL the token was presented to.
